@@ -79,10 +79,35 @@ export default function MessageInput({ conversationId, onSend }) {
     inputRef.current?.focus();
   };
 
+  const recognitionRef = useRef(null);
+
+  // Initialize Speech Recognition
+  useEffect(() => {
+    if (typeof window !== 'undefined' && ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)) {
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      recognitionRef.current = new SpeechRecognition();
+      recognitionRef.current.continuous = true;
+      recognitionRef.current.interimResults = true;
+      
+      recognitionRef.current.onresult = (event) => {
+        let currentTranscript = '';
+        for (let i = 0; i < event.results.length; i++) {
+          currentTranscript += event.results[i][0].transcript;
+        }
+        setText(currentTranscript);
+      };
+
+      recognitionRef.current.onerror = (event) => {
+        console.error('Speech recognition error:', event.error);
+      };
+    }
+  }, []);
+
   const startRecording = async () => {
     if (isTranscribing) return;
     
     setMicError('');
+    setText(''); // Clear previous text when starting new recording
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' });
@@ -99,6 +124,10 @@ export default function MessageInput({ conversationId, onSend }) {
         stream.getTracks().forEach(track => track.stop());
         clearInterval(timerRef.current);
         
+        if (recognitionRef.current) {
+          recognitionRef.current.stop();
+        }
+        
         const duration = currentDurationRef.current;
         setRecordingTime(0);
 
@@ -110,10 +139,14 @@ export default function MessageInput({ conversationId, onSend }) {
         }
 
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        // Send to backend only for emotion detection now
         await handleTranscription(audioBlob);
       };
 
       mediaRecorder.start();
+      if (recognitionRef.current) {
+        recognitionRef.current.start();
+      }
       setIsRecording(true);
       
       setRecordingTime(0);
@@ -136,6 +169,10 @@ export default function MessageInput({ conversationId, onSend }) {
     if (!isRecording) return;
     if (discard) {
       audioChunksRef.current = []; 
+      setText(''); // Clear text if discarded
+    }
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
     }
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop();
@@ -168,30 +205,31 @@ export default function MessageInput({ conversationId, onSend }) {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
 
-      if (res.data.text) {
-        setText(res.data.text);
-        
-        // Emotion detection logic
-        if (res.data.isUncertain) {
-          setUncertaintyData({
-            options: res.data.uncertaintyOptions,
-            defaultEmotion: res.data.emotion,
-            intensity: res.data.emotionIntensity
-          });
-        } else {
-          setPendingEmotion({
-            emotion: res.data.emotion || 'neutral',
-            emotionIntensity: res.data.emotionIntensity || 0
-          });
-        }
-
-        setTimeout(() => {
-          if (inputRef.current) {
-            inputRef.current.style.height = 'auto';
-            inputRef.current.style.height = Math.min(inputRef.current.scrollHeight, 128) + 'px';
-          }
-        }, 0);
+      setText((prev) => {
+        const finalTxt = prev || res.data.text || '';
+        return finalTxt;
+      });
+      
+      // Emotion detection logic
+      if (res.data.isUncertain) {
+        setUncertaintyData({
+          options: res.data.uncertaintyOptions,
+          defaultEmotion: res.data.emotion,
+          intensity: res.data.emotionIntensity
+        });
+      } else {
+        setPendingEmotion({
+          emotion: res.data.emotion || 'neutral',
+          emotionIntensity: res.data.emotionIntensity || 0
+        });
       }
+
+      setTimeout(() => {
+        if (inputRef.current) {
+          inputRef.current.style.height = 'auto';
+          inputRef.current.style.height = Math.min(inputRef.current.scrollHeight, 128) + 'px';
+        }
+      }, 0);
     } catch (err) {
       console.error(err);
       setMicError("Couldn't transcribe. Try again.");
