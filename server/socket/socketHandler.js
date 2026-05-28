@@ -44,7 +44,7 @@ const socketHandler = (io) => {
     // Send a message
     socket.on('message:send', async (data) => {
       try {
-        const { conversationId, text } = data;
+        const { conversationId, text, emotion, emotionIntensity } = data;
 
         if (!conversationId || !text || !text.trim()) return;
 
@@ -56,13 +56,17 @@ const socketHandler = (io) => {
 
         if (!conversation) return;
 
+        // Resolve emotion — default to neutral if not provided
+        const resolvedEmotion = emotion || 'neutral';
+        const resolvedIntensity = typeof emotionIntensity === 'number' ? emotionIntensity : 0;
+
         // Create message
         const message = await Message.create({
           conversationId,
           senderId: userId,
           text: text.trim(),
-          emotion: 'neutral',
-          emotionIntensity: 0,
+          emotion: resolvedEmotion,
+          emotionIntensity: resolvedIntensity,
           readBy: [userId],
         });
 
@@ -76,7 +80,7 @@ const socketHandler = (io) => {
           lastMessage: {
             text: text.trim(),
             senderId: userId,
-            emotion: 'neutral',
+            emotion: resolvedEmotion,
             createdAt: message.createdAt,
           },
         });
@@ -98,7 +102,7 @@ const socketHandler = (io) => {
             lastMessage: {
               text: text.trim(),
               senderId: userId,
-              emotion: 'neutral',
+              emotion: resolvedEmotion,
               createdAt: message.createdAt,
             },
           });

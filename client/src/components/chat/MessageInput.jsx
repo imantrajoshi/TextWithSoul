@@ -169,7 +169,7 @@ export default function MessageInput({ conversationId, onSend }) {
       });
 
       if (res.data.text) {
-        setText((prev) => (prev ? prev + ' ' + res.data.text : res.data.text));
+        setText(res.data.text);
         
         // Emotion detection logic
         if (res.data.isUncertain) {
