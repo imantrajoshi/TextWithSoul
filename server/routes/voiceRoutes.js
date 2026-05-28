@@ -1,7 +1,7 @@
 import express from 'express';
 import multer from 'multer';
 import auth from '../middleware/auth.js';
-import { transcribeAudio } from '../controllers/voiceController.js';
+import { transcribeAudio, synthesizeAudio } from '../controllers/voiceController.js';
 
 const router = express.Router();
 
@@ -15,5 +15,8 @@ const upload = multer({
 
 // Protect the route so only authenticated users can transcribe
 router.post('/transcribe', auth, upload.single('audio'), transcribeAudio);
+
+// Add the synthesize route for Phase 5
+router.post('/synthesize', auth, express.json(), synthesizeAudio);
 
 export default router;

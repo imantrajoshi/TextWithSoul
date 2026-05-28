@@ -1,6 +1,8 @@
 import OpenAI from 'openai';
 import { toFile } from 'openai';
 import WebSocket from 'ws';
+import axios from 'axios';
+import { EMOTION_VOICE_SETTINGS } from '../constants/emotionVoiceSettings.js';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY || 'dummy_key_to_prevent_startup_crash',
@@ -170,5 +172,56 @@ export const transcribeAudio = async (req, res) => {
   } catch (error) {
     console.error('Transcription/Emotion error:', error);
     res.status(500).json({ message: "Couldn't process audio. Try again or type instead." });
+  }
+};
+
+export const synthesizeAudio = async (req, res) => {
+  try {
+    const { text, emotion, voiceCloneId } = req.body;
+    
+    if (!text) {
+      return res.status(400).json({ message: 'No text provided for synthesis' });
+    }
+
+    // ElevenLabs API Key check
+    const apiKey = process.env.ELEVENLABS_API_KEY;
+    if (!apiKey || apiKey.includes('dummy') || apiKey.trim() === '') {
+      console.error('ELEVENLABS_API_KEY is missing');
+      return res.status(500).json({ message: 'ElevenLabs API key is missing' });
+    }
+
+    // Default Voice ID if voiceCloneId is not provided (Phase 5 Option A)
+    // Using Rachel as the default expressive voice
+    const voiceId = voiceCloneId || '21m00Tcm4TlvDq8ikWAM'; 
+
+    const settings = EMOTION_VOICE_SETTINGS[emotion] || EMOTION_VOICE_SETTINGS['neutral'];
+
+    const response = await axios({
+      method: 'post',
+      url: `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream`,
+      headers: {
+        'Accept': 'audio/mpeg',
+        'xi-api-key': apiKey,
+        'Content-Type': 'application/json'
+      },
+      data: {
+        text: text,
+        model_id: 'eleven_turbo_v2', // Faster model for real-time
+        voice_settings: {
+          stability: settings.stability,
+          similarity_boost: settings.similarity_boost,
+          style: settings.style,
+          use_speaker_boost: true
+        }
+      },
+      responseType: 'stream'
+    });
+
+    res.setHeader('Content-Type', 'audio/mpeg');
+    response.data.pipe(res);
+
+  } catch (error) {
+    console.error('Synthesis error:', error.response ? error.response.data : error.message);
+    res.status(500).json({ message: 'Audio synthesis failed' });
   }
 };

@@ -1,5 +1,8 @@
+import { useState, useRef, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { formatTime } from '../../utils/helpers';
+import { audioCache } from '../../utils/audioCache';
+import api from '../../services/api';
 
 const emotionStyles = {
   excited: {
@@ -89,6 +92,65 @@ export default function MessageBubble({
   const bubbleClass = isMine ? style.bubble : style.otherBubble;
   const radiusClass = isMine ? 'rounded-br-sm' : 'rounded-bl-sm';
 
+  // Playback State
+  const [playState, setPlayState] = useState('idle');
+  const audioRef = useRef(null);
+
+  useEffect(() => {
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.src = '';
+      }
+    };
+  }, []);
+
+  const handlePlay = async () => {
+    if (playState === 'playing') {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.currentTime = 0;
+      }
+      setPlayState('idle');
+      return;
+    }
+
+    setPlayState('loading');
+    try {
+      let audioUrl = audioCache.get(message._id);
+
+      if (!audioUrl) {
+        const response = await api.post('/voice/synthesize', {
+          text: message.text,
+          emotion: emotion,
+          voiceCloneId: message.sender?.voiceCloneId || null
+        }, {
+          responseType: 'blob'
+        });
+        audioUrl = URL.createObjectURL(response.data);
+        audioCache.set(message._id, audioUrl);
+      }
+
+      if (!audioRef.current) {
+        audioRef.current = new Audio();
+      }
+      audioRef.current.src = audioUrl;
+      
+      audioRef.current.onended = () => {
+        setPlayState('idle');
+      };
+      audioRef.current.onerror = () => {
+        setPlayState('idle');
+      };
+
+      await audioRef.current.play();
+      setPlayState('playing');
+    } catch (error) {
+      console.error('Playback error:', error);
+      setPlayState('idle');
+    }
+  };
+
   return (
     <div className={`flex ${isMine ? 'justify-end' : 'justify-start'} w-full mb-2`}>
       <motion.div
@@ -113,6 +175,32 @@ export default function MessageBubble({
             <span className="text-[11px] font-medium text-text-secondary bg-bg-tertiary px-1.5 py-0.5 rounded-full flex items-center gap-1 opacity-70">
               {getEmojiForEmotion(emotion)} {emotion}
             </span>
+          )}
+
+          {!isMine && (
+            <button
+              onClick={handlePlay}
+              disabled={playState === 'loading'}
+              className="ml-1 p-1 rounded-full bg-bg-tertiary hover:bg-bg-secondary text-text-secondary transition-colors"
+              title="Play AI Voice"
+            >
+              {playState === 'idle' && (
+                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" />
+                </svg>
+              )}
+              {playState === 'loading' && (
+                <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+              )}
+              {playState === 'playing' && (
+                <svg className="w-4 h-4 text-accent" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1V8a1 1 0 00-1-1H8z" clipRule="evenodd" />
+                </svg>
+              )}
+            </button>
           )}
         </div>
       </motion.div>

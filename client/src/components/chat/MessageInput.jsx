@@ -81,6 +81,8 @@ export default function MessageInput({ conversationId, onSend }) {
 
   const recognitionRef = useRef(null);
 
+  // TODO: PHASE 5 FLAG - Web Speech API uses Google servers, depends on browser support, and requires internet.
+  // For a privacy-focused V1 launch, consider swapping this back to OpenAI Whisper or an on-device model.
   // Initialize Speech Recognition
   useEffect(() => {
     if (typeof window !== 'undefined' && ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)) {
