@@ -354,10 +354,12 @@ export default function MessageInput({ conversationId, onSend }) {
                   exit={{ opacity: 0, x: -20 }}
                   className="absolute inset-0 z-10 bg-bg-tertiary flex items-center justify-between px-4 w-full"
                 >
-                  <div className="flex items-center gap-2 text-danger">
-                    <div className="w-2.5 h-2.5 rounded-full bg-danger animate-pulse" />
-                    <span className="text-sm font-bold font-mono tracking-wider w-12">{formatTime(recordingTime)}</span>
-                    <span className="text-sm font-medium text-text-secondary ml-2">Recording...</span>
+                  <div className="flex items-center gap-2 text-danger flex-1 overflow-hidden">
+                    <div className="w-2.5 h-2.5 rounded-full bg-danger animate-pulse shrink-0" />
+                    <span className="text-sm font-bold font-mono tracking-wider shrink-0">{formatTime(recordingTime)}</span>
+                    <span className="text-sm font-medium text-text-secondary ml-2 truncate">
+                      {text ? text : 'Listening...'}
+                    </span>
                   </div>
                   
                   <button
@@ -373,7 +375,7 @@ export default function MessageInput({ conversationId, onSend }) {
                   key="textarea"
                   ref={inputRef}
                   id="message-input"
-                  value={isTranscribing ? 'Transcribing...' : text}
+                  value={isTranscribing ? (text || 'Analyzing emotion...') : text}
                   onChange={(e) => {
                     if (isTranscribing) return;
                     setText(e.target.value);
@@ -396,7 +398,7 @@ export default function MessageInput({ conversationId, onSend }) {
                     transition-all duration-150
                     resize-none max-h-32
                     font-sans self-end
-                    ${isTranscribing ? 'animate-pulse text-text-secondary' : ''}
+                    ${isTranscribing ? 'animate-pulse text-text-secondary opacity-70' : ''}
                   `}
                   style={{
                     height: 'auto',
