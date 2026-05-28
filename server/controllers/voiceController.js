@@ -191,8 +191,8 @@ export const synthesizeAudio = async (req, res) => {
     }
 
     // Default Voice ID if voiceCloneId is not provided (Phase 5 Option A)
-    // Using Rachel as the default expressive voice
-    const voiceId = voiceCloneId || '21m00Tcm4TlvDq8ikWAM'; 
+    // Using Roger as the default expressive voice because it works on the Free Tier API
+    const voiceId = voiceCloneId || 'CwhRBWXzGAHq8TQ4Fs17'; 
 
     const settings = EMOTION_VOICE_SETTINGS[emotion] || EMOTION_VOICE_SETTINGS['neutral'];
 
@@ -221,7 +221,17 @@ export const synthesizeAudio = async (req, res) => {
     response.data.pipe(res);
 
   } catch (error) {
-    console.error('Synthesis error:', error.response ? error.response.data : error.message);
+    if (error.response && error.response.data && typeof error.response.data.on === 'function') {
+      let errorBody = '';
+      error.response.data.on('data', chunk => {
+        errorBody += chunk.toString();
+      });
+      error.response.data.on('end', () => {
+        console.error('ElevenLabs API Error (Stream):', errorBody);
+      });
+    } else {
+      console.error('Synthesis error:', error.response ? error.response.data : error.message);
+    }
     res.status(500).json({ message: 'Audio synthesis failed' });
   }
 };
