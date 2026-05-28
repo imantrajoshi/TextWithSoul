@@ -94,6 +94,7 @@ export default function MessageBubble({
 
   // Playback State
   const [playState, setPlayState] = useState('idle');
+  const [hasError, setHasError] = useState(false);
   const audioRef = useRef(null);
 
   useEffect(() => {
@@ -140,14 +141,14 @@ export default function MessageBubble({
         setPlayState('idle');
       };
       audioRef.current.onerror = () => {
-        setPlayState('idle');
+        setHasError(true);
       };
 
       await audioRef.current.play();
       setPlayState('playing');
     } catch (error) {
       console.error('Playback error:', error);
-      setPlayState('idle');
+      setHasError(true);
     }
   };
 
@@ -177,7 +178,7 @@ export default function MessageBubble({
             </span>
           )}
 
-          {!isMine && (
+          {!isMine && !hasError && (
             <button
               onClick={handlePlay}
               disabled={playState === 'loading'}
