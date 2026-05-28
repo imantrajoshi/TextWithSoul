@@ -73,6 +73,19 @@ const emotionAnimations = {
   }
 };
 
+// FREE fallback voice. Maps each emotion to rate/pitch so the browser's built-in
+// SpeechSynthesis still conveys some emotional flavour when the PAID ElevenLabs
+// clone is unavailable (no key / quota / rate-limit). Zero spend.
+const EMOTION_TTS = {
+  excited: { rate: 1.15, pitch: 1.3 },
+  happy: { rate: 1.1, pitch: 1.2 },
+  sad: { rate: 0.85, pitch: 0.8 },
+  angry: { rate: 1.1, pitch: 0.7 },
+  anxious: { rate: 1.2, pitch: 1.1 },
+  loving: { rate: 0.95, pitch: 1.15 },
+  neutral: { rate: 1.0, pitch: 1.0 },
+};
+
 export default function MessageBubble({
   message,
   isMine,
@@ -96,6 +109,7 @@ export default function MessageBubble({
   const [playState, setPlayState] = useState('idle');
   const [hasError, setHasError] = useState(false);
   const audioRef = useRef(null);
+  const usingTTSRef = useRef(false);
 
   useEffect(() => {
     return () => {
@@ -103,15 +117,38 @@ export default function MessageBubble({
         audioRef.current.pause();
         audioRef.current.src = '';
       }
+      if (typeof window !== 'undefined' && window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
     };
   }, []);
 
+  // FREE fallback playback using the browser's built-in voice. Returns false if
+  // SpeechSynthesis isn't available so the caller can show an error instead.
+  const speakWithBrowserTTS = () => {
+    if (typeof window === 'undefined' || !window.speechSynthesis) return false;
+    window.speechSynthesis.cancel();
+    const utter = new SpeechSynthesisUtterance(message.text);
+    const cfg = EMOTION_TTS[emotion] || EMOTION_TTS.neutral;
+    utter.rate = cfg.rate;
+    utter.pitch = cfg.pitch;
+    utter.onend = () => { usingTTSRef.current = false; setPlayState('idle'); };
+    utter.onerror = () => { usingTTSRef.current = false; setPlayState('idle'); };
+    usingTTSRef.current = true;
+    window.speechSynthesis.speak(utter);
+    return true;
+  };
+
   const handlePlay = async () => {
     if (playState === 'playing') {
+      if (usingTTSRef.current && typeof window !== 'undefined' && window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
       if (audioRef.current) {
         audioRef.current.pause();
         audioRef.current.currentTime = 0;
       }
+      usingTTSRef.current = false;
       setPlayState('idle');
       return;
     }
@@ -121,6 +158,8 @@ export default function MessageBubble({
       let audioUrl = audioCache.get(message._id);
 
       if (!audioUrl) {
+        // PAID: request the ElevenLabs voice clone. Throws on 503 when the free
+        // tier is exhausted or no key is set → handled in catch below.
         const response = await api.post('/voice/synthesize', {
           text: message.text,
           emotion: emotion,
@@ -136,19 +175,26 @@ export default function MessageBubble({
         audioRef.current = new Audio();
       }
       audioRef.current.src = audioUrl;
-      
+
       audioRef.current.onended = () => {
         setPlayState('idle');
       };
       audioRef.current.onerror = () => {
-        setHasError(true);
+        if (!speakWithBrowserTTS()) setHasError(true);
       };
 
+      usingTTSRef.current = false;
       await audioRef.current.play();
       setPlayState('playing');
     } catch (error) {
-      console.error('Playback error:', error);
-      setHasError(true);
+      // PAID voice unavailable (no key / quota / rate-limit) → gracefully fall
+      // back to the FREE browser voice so the demo keeps working. No upgrade.
+      console.warn('Voice clone unavailable, using free browser TTS.', error?.message);
+      if (speakWithBrowserTTS()) {
+        setPlayState('playing');
+      } else {
+        setHasError(true);
+      }
     }
   };
 

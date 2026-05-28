@@ -1,22 +1,26 @@
 import express from 'express';
 import multer from 'multer';
 import auth from '../middleware/auth.js';
-import { transcribeAudio, synthesizeAudio } from '../controllers/voiceController.js';
+import { analyzeVoice, synthesizeAudio, getUsageStats } from '../controllers/voiceController.js';
 
 const router = express.Router();
 
-// Configure multer to store file in memory with a 10MB limit
+// Store the uploaded audio in memory, 10MB max.
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 10 * 1024 * 1024, // 10MB max limit
+    fileSize: 10 * 1024 * 1024,
   },
 });
 
-// Protect the route so only authenticated users can transcribe
-router.post('/transcribe', auth, upload.single('audio'), transcribeAudio);
+// Emotion analysis from the recorded audio.
+// (Transcription is handled client-side for free via the Web Speech API.)
+router.post('/analyze', auth, upload.single('audio'), analyzeVoice);
 
-// Add the synthesize route for Phase 5
+// PAID: ElevenLabs voice playback. Degrades to free browser TTS on the client.
 router.post('/synthesize', auth, express.json(), synthesizeAudio);
+
+// Dev helper: inspect cumulative paid-API usage for this server run.
+router.get('/usage', auth, getUsageStats);
 
 export default router;

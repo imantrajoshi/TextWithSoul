@@ -1,14 +1,26 @@
-import OpenAI from 'openai';
-import { toFile } from 'openai';
 import WebSocket from 'ws';
 import axios from 'axios';
 import { EMOTION_VOICE_SETTINGS } from '../constants/emotionVoiceSettings.js';
+import { trackHume, trackElevenLabs, getUsage } from '../utils/usageTracker.js';
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY || 'dummy_key_to_prevent_startup_crash',
-});
+/*
+ * ──────────────────────────────────────────────────────────────────────────
+ * EXPERIMENTAL PROTOTYPE — ZERO-SPEND POLICY
+ * ──────────────────────────────────────────────────────────────────────────
+ * Speech-to-text is done FOR FREE in the browser (Web Speech API — see
+ * client/src/components/chat/MessageInput.jsx). There is intentionally NO
+ * server-side transcription; OpenAI Whisper was removed so we never spend.
+ *
+ * Hume AI (emotion) and ElevenLabs (voice) below are PAID premium integrations
+ * kept "architecturally ready" for the production launch. In this phase they
+ * run only inside their free tiers; usage is logged via usageTracker. If a call
+ * fails (missing key, quota, rate-limit, timeout) we gracefully fall back to a
+ * FREE mock/stub so the end-to-end demo never breaks.
+ * See README → "Free Tier vs Production".
+ * ──────────────────────────────────────────────────────────────────────────
+ */
 
-// Hume to Vybe Mapping
+// Hume's raw emotion labels → our 7 product emotions.
 const EMOTION_MAP = {
   'Amusement': 'happy',
   'Joy': 'happy',
@@ -26,19 +38,31 @@ const EMOTION_MAP = {
   'Tenderness': 'loving',
 };
 
+// FREE fallback: plausible emotion scores used when the PAID Hume API is
+// unavailable (no key) or unreachable (quota / rate-limit / timeout), so the
+// emotional UI keeps demonstrating end-to-end at zero spend.
+const mockEmotions = () => {
+  const rand = Math.random();
+  if (rand < 0.33) return [{ name: 'Joy', score: 0.9 }];
+  if (rand < 0.66) return [{ name: 'Anger', score: 0.85 }];
+  // Split confidence → exercises the uncertainty popup path.
+  return [
+    { name: 'Joy', score: 0.85 },
+    { name: 'Sadness', score: 0.80 },
+  ];
+};
+
 const mapHumeToVybe = (humeEmotions) => {
   if (!humeEmotions || humeEmotions.length === 0) {
     return { emotion: 'neutral', emotionIntensity: 0, isUncertain: false, uncertaintyOptions: null };
   }
 
-  // Sort descending by score
   const sorted = [...humeEmotions].sort((a, b) => b.score - a.score);
-
   const topHume = sorted[0];
   const secondHume = sorted[1];
 
-  let topTag = EMOTION_MAP[topHume.name] || 'neutral';
-  let secondTag = secondHume ? (EMOTION_MAP[secondHume.name] || 'neutral') : 'neutral';
+  const topTag = EMOTION_MAP[topHume.name] || 'neutral';
+  const secondTag = secondHume ? (EMOTION_MAP[secondHume.name] || 'neutral') : 'neutral';
 
   let isUncertain = false;
   let uncertaintyOptions = null;
@@ -61,43 +85,38 @@ const mapHumeToVybe = (humeEmotions) => {
 
 const analyzeEmotion = (audioBuffer) => {
   return new Promise((resolve) => {
-    // If Hume API key is missing, mock the emotion detection for testing
-    if (!process.env.HUME_API_KEY || process.env.HUME_API_KEY.includes('dummy') || process.env.HUME_API_KEY.includes('[paste') || process.env.HUME_API_KEY.trim() === '') {
-      console.log('⚠ HUME_API_KEY is missing. Mocking emotion data...');
-      setTimeout(() => {
-        // Randomly simulate different states for UI testing:
-        const rand = Math.random();
-        if (rand < 0.33) {
-          // 33% chance: Clear winner (Excited)
-          resolve([{ name: 'Joy', score: 0.9 }]);
-        } else if (rand < 0.66) {
-          // 33% chance: Clear winner (Angry)
-          resolve([{ name: 'Anger', score: 0.85 }]);
-        } else {
-          // 34% chance: Uncertainty (scores within 0.15)
-          resolve([
-            { name: 'Joy', score: 0.85 },
-            { name: 'Sadness', score: 0.80 }
-          ]);
-        }
-      }, 1000);
+    const keyMissing =
+      !process.env.HUME_API_KEY ||
+      process.env.HUME_API_KEY.includes('dummy') ||
+      process.env.HUME_API_KEY.includes('[paste') ||
+      process.env.HUME_API_KEY.trim() === '';
+
+    // No key → run the FREE mock. Zero spend.
+    if (keyMissing) {
+      console.log('[Hume][FREE MOCK] No API key — generating mock emotions (zero spend).');
+      setTimeout(() => resolve(mockEmotions()), 800);
       return;
     }
 
+    // ── PAID: Hume AI prosody model (free tier has limited credits) ──
+    trackHume();
     const ws = new WebSocket(`wss://api.hume.ai/v0/stream/models?apikey=${process.env.HUME_API_KEY}`);
+
+    // Any failure degrades to the FREE mock so the demo keeps working.
+    const degrade = (reason) => {
+      console.warn(`[Hume] ${reason} — falling back to FREE mock emotions (no upgrade, zero spend).`);
+      resolve(mockEmotions());
+    };
 
     const timeout = setTimeout(() => {
       ws.close();
-      resolve(null);
-    }, 8000); // 8 second timeout for Hume
+      degrade('Timeout after 8s');
+    }, 8000);
 
     ws.on('open', () => {
-      const base64Audio = audioBuffer.toString('base64');
       ws.send(JSON.stringify({
-        data: base64Audio,
-        models: {
-          prosody: {}
-        }
+        data: audioBuffer.toString('base64'),
+        models: { prosody: {} },
       }));
     });
 
@@ -105,96 +124,74 @@ const analyzeEmotion = (audioBuffer) => {
       clearTimeout(timeout);
       try {
         const response = JSON.parse(data);
-        if (response.prosody && response.prosody.predictions && response.prosody.predictions.length > 0) {
-          const emotions = response.prosody.predictions[0].emotions;
+        if (response.prosody?.predictions?.length > 0) {
           ws.close();
-          resolve(emotions);
+          resolve(response.prosody.predictions[0].emotions);
         } else {
           ws.close();
-          resolve(null);
+          degrade('Empty prosody prediction');
         }
       } catch (err) {
-        console.error('Hume parse error:', err);
         ws.close();
-        resolve(null);
+        degrade(`Parse error: ${err.message}`);
       }
     });
 
     ws.on('unexpected-response', (req, res) => {
-      console.error(`Hume WS Unexpected Response: ${res.statusCode}`);
       clearTimeout(timeout);
-      resolve(null);
+      // 401/402/429 here typically means a key/quota/free-tier limit.
+      degrade(`HTTP ${res.statusCode} (likely free-tier or auth limit)`);
     });
 
     ws.on('error', (err) => {
-      console.error('Hume WS Error:', err);
       clearTimeout(timeout);
-      resolve(null);
+      degrade(`WebSocket error: ${err.message}`);
     });
   });
 };
 
-export const transcribeAudio = async (req, res) => {
+// POST /api/voice/analyze
+// Detects emotion from the recorded audio. Transcription is NOT done here — it
+// happens client-side for free via the Web Speech API.
+export const analyzeVoice = async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ message: 'No audio file provided' });
     }
 
-    // Run Whisper and Hume in parallel
-    const audioBuffer = req.file.buffer;
-    
-    // If OpenAI API key is missing, mock the transcription
-    let whisperPromise;
-    if (!process.env.OPENAI_API_KEY || process.env.OPENAI_API_KEY.includes('dummy') || process.env.OPENAI_API_KEY.trim() === '') {
-      console.log('⚠ OPENAI_API_KEY is missing. Mocking transcription...');
-      whisperPromise = new Promise((resolve) => {
-        setTimeout(() => {
-          resolve({ text: "This is a mocked transcription because the OpenAI API key was not provided. It works perfectly!" });
-        }, 1500);
-      });
-    } else {
-      whisperPromise = openai.audio.transcriptions.create({
-        file: await toFile(audioBuffer, 'audio.webm', { type: 'audio/webm' }),
-        model: 'whisper-1',
-      });
-    }
-
-    const humePromise = analyzeEmotion(audioBuffer);
-
-    const [transcription, humeEmotions] = await Promise.all([whisperPromise, humePromise]);
-
-    const emotionData = mapHumeToVybe(humeEmotions);
-
-    res.status(200).json({
-      text: transcription.text.trim(),
-      ...emotionData,
-    });
+    const humeEmotions = await analyzeEmotion(req.file.buffer);
+    res.status(200).json(mapHumeToVybe(humeEmotions));
   } catch (error) {
-    console.error('Transcription/Emotion error:', error);
-    res.status(500).json({ message: "Couldn't process audio. Try again or type instead." });
+    console.error('Emotion analysis error:', error);
+    // Never block sending a message — degrade silently to neutral.
+    res.status(200).json({ emotion: 'neutral', emotionIntensity: 0, isUncertain: false, uncertaintyOptions: null });
   }
 };
 
+// POST /api/voice/synthesize
+// PAID: ElevenLabs voice playback. On any failure (missing key / quota /
+// rate-limit) we respond 503 with { fallback: 'browser-tts' } and the client
+// plays the message using the FREE browser SpeechSynthesis voice instead.
 export const synthesizeAudio = async (req, res) => {
   try {
     const { text, emotion, voiceCloneId } = req.body;
-    
+
     if (!text) {
       return res.status(400).json({ message: 'No text provided for synthesis' });
     }
 
-    // ElevenLabs API Key check
     const apiKey = process.env.ELEVENLABS_API_KEY;
     if (!apiKey || apiKey.includes('dummy') || apiKey.trim() === '') {
-      console.error('ELEVENLABS_API_KEY is missing');
-      return res.status(500).json({ message: 'ElevenLabs API key is missing' });
+      console.warn('[ElevenLabs][FREE FALLBACK] No API key — client will use free browser TTS.');
+      return res.status(503).json({ fallback: 'browser-tts', message: 'Voice clone unavailable (no key)' });
     }
 
-    // Default Voice ID if voiceCloneId is not provided (Phase 5 Option A)
-    // Using Roger as the default expressive voice because it works on the Free Tier API
-    const voiceId = voiceCloneId || 'CwhRBWXzGAHq8TQ4Fs17'; 
-
+    // Default expressive voice (works on the ElevenLabs free tier). In production
+    // this is the user's own cloned voice (message.sender.voiceCloneId).
+    const voiceId = voiceCloneId || 'CwhRBWXzGAHq8TQ4Fs17';
     const settings = EMOTION_VOICE_SETTINGS[emotion] || EMOTION_VOICE_SETTINGS['neutral'];
+
+    trackElevenLabs(text.length);
 
     const response = await axios({
       method: 'post',
@@ -202,36 +199,46 @@ export const synthesizeAudio = async (req, res) => {
       headers: {
         'Accept': 'audio/mpeg',
         'xi-api-key': apiKey,
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
       },
       data: {
-        text: text,
-        model_id: 'eleven_turbo_v2', // Faster model for real-time
+        text,
+        model_id: 'eleven_turbo_v2',
         voice_settings: {
           stability: settings.stability,
           similarity_boost: settings.similarity_boost,
           style: settings.style,
-          use_speaker_boost: true
-        }
+          use_speaker_boost: true,
+        },
       },
-      responseType: 'stream'
+      responseType: 'stream',
     });
 
     res.setHeader('Content-Type', 'audio/mpeg');
     response.data.pipe(res);
-
   } catch (error) {
-    if (error.response && error.response.data && typeof error.response.data.on === 'function') {
-      let errorBody = '';
-      error.response.data.on('data', chunk => {
-        errorBody += chunk.toString();
-      });
-      error.response.data.on('end', () => {
-        console.error('ElevenLabs API Error (Stream):', errorBody);
-      });
-    } else {
-      console.error('Synthesis error:', error.response ? error.response.data : error.message);
+    const status = error.response?.status;
+    console.warn(
+      `[ElevenLabs] Synthesis failed (status ${status ?? 'n/a'}) — ` +
+      `no upgrade; client falls back to FREE browser TTS.`
+    );
+
+    // Surface ElevenLabs' error body when it's a stream (helps spot quota hits).
+    if (error.response?.data && typeof error.response.data.on === 'function') {
+      let body = '';
+      error.response.data.on('data', (chunk) => { body += chunk.toString(); });
+      error.response.data.on('end', () => console.warn('[ElevenLabs] error body:', body));
     }
-    res.status(500).json({ message: 'Audio synthesis failed' });
+
+    if (!res.headersSent) {
+      res.status(503).json({ fallback: 'browser-tts', message: 'Voice synthesis unavailable' });
+    } else {
+      res.end();
+    }
   }
+};
+
+// GET /api/voice/usage — dev helper to inspect paid-API usage this run.
+export const getUsageStats = (req, res) => {
+  res.status(200).json(getUsage());
 };

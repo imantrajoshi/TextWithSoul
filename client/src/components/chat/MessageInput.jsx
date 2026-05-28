@@ -81,8 +81,11 @@ export default function MessageInput({ conversationId, onSend }) {
 
   const recognitionRef = useRef(null);
 
-  // TODO: PHASE 5 FLAG - Web Speech API uses Google servers, depends on browser support, and requires internet.
-  // For a privacy-focused V1 launch, consider swapping this back to OpenAI Whisper or an on-device model.
+  // Speech-to-text runs entirely in the browser via the FREE Web Speech API
+  // (zero spend). Trade-off: needs Chrome/Edge + internet. The recorded audio is
+  // still sent to the server, but only for emotion analysis — not transcription.
+  // PRODUCTION: swap to a paid/on-device model (e.g. Whisper) for privacy and
+  // cross-browser support.
   // Initialize Speech Recognition
   useEffect(() => {
     if (typeof window !== 'undefined' && ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)) {
@@ -141,8 +144,8 @@ export default function MessageInput({ conversationId, onSend }) {
         }
 
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        // Send to backend only for emotion detection now
-        await handleTranscription(audioBlob);
+        // Send to backend only for emotion analysis (text already came from Web Speech).
+        await handleEmotionAnalysis(audioBlob);
       };
 
       mediaRecorder.start();
@@ -197,22 +200,18 @@ export default function MessageInput({ conversationId, onSend }) {
     };
   }, []);
 
-  const handleTranscription = async (blob) => {
+  const handleEmotionAnalysis = async (blob) => {
     setIsTranscribing(true);
     try {
       const formData = new FormData();
       formData.append('audio', blob, 'audio.webm');
 
-      const res = await api.post('/voice/transcribe', formData, {
+      const res = await api.post('/voice/analyze', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
 
-      setText((prev) => {
-        const finalTxt = prev || res.data.text || '';
-        return finalTxt;
-      });
-      
-      // Emotion detection logic
+      // Text is already populated live by the Web Speech API; the server only
+      // returns the detected emotion here.
       if (res.data.isUncertain) {
         setUncertaintyData({
           options: res.data.uncertaintyOptions,
@@ -234,7 +233,7 @@ export default function MessageInput({ conversationId, onSend }) {
       }, 0);
     } catch (err) {
       console.error(err);
-      setMicError("Couldn't transcribe. Try again.");
+      setMicError("Couldn't analyze audio. Try again.");
       setTimeout(() => setMicError(''), 4000);
     } finally {
       setIsTranscribing(false);
