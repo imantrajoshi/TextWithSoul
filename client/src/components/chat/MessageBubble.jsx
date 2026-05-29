@@ -147,12 +147,21 @@ export default function MessageBubble({
 
   useEffect(() => {
     return () => {
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current.src = '';
-      }
+      // Stop TTS first: clear the guard BEFORE cancel so any queued utterance's
+      // onend handler (speakNext) sees we're done and doesn't continue speaking.
+      usingTTSRef.current = false;
       if (typeof window !== 'undefined' && window.speechSynthesis) {
         window.speechSynthesis.cancel();
+      }
+      if (audioRef.current) {
+        // Detach handlers BEFORE clearing src — setting src='' fires the audio
+        // element's `error` event, which would otherwise trigger the browser-TTS
+        // fallback and make the message speak itself on unmount/logout.
+        audioRef.current.onerror = null;
+        audioRef.current.onended = null;
+        audioRef.current.pause();
+        audioRef.current.removeAttribute('src');
+        audioRef.current.load();
       }
       playbackManager.release(stopPlayback);
     };

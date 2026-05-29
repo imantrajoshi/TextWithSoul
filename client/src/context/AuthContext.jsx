@@ -51,6 +51,11 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   const logout = useCallback(() => {
+    // Stop any voice playback immediately so a message can't keep speaking
+    // after logout.
+    if (typeof window !== 'undefined' && window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
     localStorage.removeItem('token');
     setToken(null);
     setUser(null);
