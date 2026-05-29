@@ -1,6 +1,7 @@
 import Message from '../models/Message.js';
 import Conversation from '../models/Conversation.js';
 import User from '../models/User.js';
+import { analyzeText } from '../utils/emotionAnalyzer.js';
 
 // Track online users: Map<userId, Set<socketId>>
 const onlineUsers = new Map();
@@ -44,7 +45,7 @@ const socketHandler = (io) => {
     // Send a message
     socket.on('message:send', async (data) => {
       try {
-        const { conversationId, text, emotion, emotionIntensity, segments } = data;
+        const { conversationId, text, emotion, emotionIntensity } = data;
 
         if (!conversationId || !text || !text.trim()) return;
 
@@ -56,22 +57,26 @@ const socketHandler = (io) => {
 
         if (!conversation) return;
 
-        // Resolve emotion — default to neutral if not provided
+        // Emotion is resolved AUTHORITATIVELY on the server so every message gets
+        // emotion + per-sentence segments regardless of client timing (e.g. a typed
+        // message sent before the client's debounced preview finished).
         const ALLOWED_EMOTIONS = ['excited', 'happy', 'sad', 'angry', 'anxious', 'loving', 'neutral'];
-        const resolvedEmotion = ALLOWED_EMOTIONS.includes(emotion) ? emotion : 'neutral';
-        const resolvedIntensity = typeof emotionIntensity === 'number' ? emotionIntensity : 0;
+        const analysis = analyzeText(text);
+        let resolvedEmotion = analysis.emotion;
+        let resolvedIntensity = analysis.emotionIntensity;
+        let resolvedSegments = analysis.segments;
 
-        // Sanitize per-sentence emotion breakdown (client-supplied).
-        const resolvedSegments = Array.isArray(segments)
-          ? segments.slice(0, 40).map((s) => ({
-              text: typeof s?.text === 'string' ? s.text.slice(0, 1000) : '',
-              emotion: ALLOWED_EMOTIONS.includes(s?.emotion) ? s.emotion : 'neutral',
-              emotionIntensity:
-                typeof s?.emotionIntensity === 'number'
-                  ? Math.max(0, Math.min(1, s.emotionIntensity))
-                  : 0,
-            })).filter((s) => s.text)
-          : [];
+        // If the words were neutral but the client detected something (e.g. voice
+        // tone from Hume prosody), honour the client's hint.
+        if (
+          resolvedEmotion === 'neutral' &&
+          ALLOWED_EMOTIONS.includes(emotion) &&
+          emotion !== 'neutral'
+        ) {
+          resolvedEmotion = emotion;
+          resolvedIntensity = typeof emotionIntensity === 'number' ? emotionIntensity : 0;
+          resolvedSegments = [{ text: text.trim(), emotion: resolvedEmotion, emotionIntensity: resolvedIntensity }];
+        }
 
         // Create message
         const message = await Message.create({

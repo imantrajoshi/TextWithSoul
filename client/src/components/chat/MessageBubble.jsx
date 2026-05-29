@@ -1,7 +1,8 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { motion } from 'motion/react';
 import { formatTime } from '../../utils/helpers';
 import { audioCache } from '../../utils/audioCache';
+import { playbackManager } from '../../utils/playbackManager';
 import api from '../../services/api';
 
 const emotionStyles = {
@@ -129,6 +130,21 @@ export default function MessageBubble({
   const audioRef = useRef(null);
   const usingTTSRef = useRef(false);
 
+  // Stop THIS bubble's playback (audio clip + browser TTS) and reset its UI.
+  // Stable identity so the global playbackManager can call it to stop us when
+  // another message starts playing.
+  const stopPlayback = useCallback(() => {
+    if (typeof window !== 'undefined' && window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+    }
+    usingTTSRef.current = false;
+    setPlayState('idle');
+  }, []);
+
   useEffect(() => {
     return () => {
       if (audioRef.current) {
@@ -138,8 +154,9 @@ export default function MessageBubble({
       if (typeof window !== 'undefined' && window.speechSynthesis) {
         window.speechSynthesis.cancel();
       }
+      playbackManager.release(stopPlayback);
     };
-  }, []);
+  }, [stopPlayback]);
 
   // FREE fallback playback using the browser's built-in voice. Speaks each
   // sentence with ITS OWN emotion's rate/pitch, so a mixed message sounds happy
@@ -159,6 +176,7 @@ export default function MessageBubble({
       if (!usingTTSRef.current || i >= parts.length) {
         usingTTSRef.current = false;
         setPlayState('idle');
+        playbackManager.release(stopPlayback);
         return;
       }
       const part = parts[i++];
@@ -167,7 +185,7 @@ export default function MessageBubble({
       utter.rate = cfg.rate;
       utter.pitch = cfg.pitch;
       utter.onend = speakNext;
-      utter.onerror = () => { usingTTSRef.current = false; setPlayState('idle'); };
+      utter.onerror = () => { usingTTSRef.current = false; setPlayState('idle'); playbackManager.release(stopPlayback); };
       window.speechSynthesis.speak(utter);
     };
     speakNext();
@@ -176,23 +194,19 @@ export default function MessageBubble({
 
   const handlePlay = async () => {
     if (playState === 'playing') {
-      if (usingTTSRef.current && typeof window !== 'undefined' && window.speechSynthesis) {
-        window.speechSynthesis.cancel();
-      }
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current.currentTime = 0;
-      }
-      usingTTSRef.current = false;
-      setPlayState('idle');
+      stopPlayback();
+      playbackManager.release(stopPlayback);
       return;
     }
+
+    // Take over the single global playback slot — stops any other message.
+    playbackManager.start(stopPlayback);
 
     // Mixed-emotion messages play sentence-by-sentence with per-emotion voices —
     // a single synthesized clip would flatten the mix, so use the free segmented voice.
     if (isMixed) {
       if (speakWithBrowserTTS()) setPlayState('playing');
-      else setHasError(true);
+      else { setHasError(true); playbackManager.release(stopPlayback); }
       return;
     }
 
@@ -221,9 +235,10 @@ export default function MessageBubble({
 
       audioRef.current.onended = () => {
         setPlayState('idle');
+        playbackManager.release(stopPlayback);
       };
       audioRef.current.onerror = () => {
-        if (!speakWithBrowserTTS()) setHasError(true);
+        if (!speakWithBrowserTTS()) { setHasError(true); playbackManager.release(stopPlayback); }
       };
 
       usingTTSRef.current = false;
@@ -237,6 +252,7 @@ export default function MessageBubble({
         setPlayState('playing');
       } else {
         setHasError(true);
+        playbackManager.release(stopPlayback);
       }
     }
   };
