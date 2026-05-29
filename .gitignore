@@ -4,3 +4,5 @@ dist
 .DS_Store
 *.log
 uploads
+voice-service/.venv
+__pycache__

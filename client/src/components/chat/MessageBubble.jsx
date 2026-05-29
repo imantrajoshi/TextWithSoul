@@ -220,6 +220,7 @@ export default function MessageBubble({
         const response = await api.post('/voice/synthesize', {
           text: message.text,
           emotion: emotion,
+          senderId: message.senderId?._id || message.senderId || null,
           voiceCloneId: message.sender?.voiceCloneId || null
         }, {
           responseType: 'blob'

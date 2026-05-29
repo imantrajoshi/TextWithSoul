@@ -1,5 +1,7 @@
 import WebSocket from 'ws';
 import axios from 'axios';
+import fs from 'fs/promises';
+import path from 'path';
 import { EMOTION_VOICE_SETTINGS } from '../constants/emotionVoiceSettings.js';
 import { trackHume, trackElevenLabs, getUsage } from '../utils/usageTracker.js';
 import { analyzeText } from '../utils/emotionAnalyzer.js';
@@ -207,18 +209,74 @@ export const analyzeMessageText = (req, res) => {
   res.status(200).json(analyzeText(text));
 };
 
+const VOICE_SAMPLE_EMOTIONS = ['neutral', 'happy', 'excited', 'sad', 'angry', 'anxious', 'loving'];
+
+// Locate the sender's enrolled voice sample to use as the clone reference:
+// prefer the message's emotion, then neutral, then any available sample.
+const findReferenceSample = async (senderId, emotion) => {
+  if (!senderId || !/^[a-f0-9]{24}$/i.test(String(senderId))) return null;
+  const dir = path.join(process.cwd(), 'uploads', 'voice-samples', String(senderId));
+  const order = [emotion, 'neutral', ...VOICE_SAMPLE_EMOTIONS].filter(
+    (e, i, arr) => VOICE_SAMPLE_EMOTIONS.includes(e) && arr.indexOf(e) === i
+  );
+  for (const e of order) {
+    const p = path.join(dir, `${e}.webm`);
+    try {
+      await fs.access(p);
+      return p;
+    } catch {
+      /* keep looking */
+    }
+  }
+  return null;
+};
+
 // POST /api/voice/synthesize
-// PAID: ElevenLabs voice playback. On any failure (missing key / quota /
-// rate-limit) we respond 503 with { fallback: 'browser-tts' } and the client
-// plays the message using the FREE browser SpeechSynthesis voice instead.
+// Voice playback, in order of preference:
+//   1. FREE self-hosted XTTS clone (VOICE_CLONE_URL) — the sender's OWN voice.
+//   2. PAID ElevenLabs (default voice) when a key is set.
+//   3. 503 { fallback: 'browser-tts' } → client uses the free browser voice.
+// Each tier degrades gracefully to the next, so playback never hard-fails.
 export const synthesizeAudio = async (req, res) => {
   try {
-    const { text, emotion, voiceCloneId } = req.body;
+    const { text, emotion, voiceCloneId, senderId } = req.body;
 
     if (!text) {
       return res.status(400).json({ message: 'No text provided for synthesis' });
     }
 
+    // ── 1. FREE self-hosted voice clone (XTTS) — the real "sender's voice" ──
+    const cloneUrl = process.env.VOICE_CLONE_URL;
+    if (cloneUrl) {
+      try {
+        const refPath = await findReferenceSample(senderId, emotion);
+        if (refPath) {
+          const buf = await fs.readFile(refPath);
+          const form = new FormData();
+          form.append('text', text);
+          form.append('language', 'en');
+          form.append('speaker', new Blob([buf]), path.basename(refPath));
+
+          const r = await fetch(`${cloneUrl.replace(/\/$/, '')}/synthesize`, {
+            method: 'POST',
+            body: form,
+          });
+
+          if (r.ok) {
+            const wav = Buffer.from(await r.arrayBuffer());
+            res.setHeader('Content-Type', 'audio/wav');
+            return res.send(wav);
+          }
+          console.warn(`[VoiceClone] XTTS responded ${r.status} — falling back.`);
+        } else {
+          console.warn('[VoiceClone] Sender has no enrollment sample — falling back.');
+        }
+      } catch (err) {
+        console.warn(`[VoiceClone] XTTS unavailable (${err.message}) — falling back.`);
+      }
+    }
+
+    // ── 2. PAID ElevenLabs (shared default voice) ──
     const apiKey = process.env.ELEVENLABS_API_KEY;
     if (!apiKey || apiKey.includes('dummy') || apiKey.trim() === '') {
       console.warn('[ElevenLabs][FREE FALLBACK] No API key — client will use free browser TTS.');

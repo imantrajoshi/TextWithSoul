@@ -1,0 +1,7 @@
+# FREE, self-hosted voice cloning. coqui-tts pulls in torch + the XTTS-v2 model.
+# (coqui-tts is the maintained fork of the original `TTS` package and keeps the
+#  same `TTS.api` import path.)
+coqui-tts>=0.24.0
+fastapi>=0.110
+uvicorn[standard]>=0.29
+python-multipart>=0.0.9
