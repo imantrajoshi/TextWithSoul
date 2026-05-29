@@ -82,4 +82,29 @@ Differences vs XTTS:
   optional `exaggeration` form field.
 - Cloning is zero-shot from a ~5s reference, same as XTTS. CPU inference on a Mac.
 
+---
+
+# Voice-tone emotion detector (`emotion.py`) — EXPERIMENTAL, currently OFF
+
+`emotion.py` is a Speech Emotion Recognition (SER) service meant to detect emotion
+from *how* a voice note was said (tone), not just the words. It's wired into the
+backend behind `EMOTION_URL` in `server/.env` — **left commented out / OFF** because
+the free off-the-shelf models we tried were not usable:
+
+- `superb/wav2vec2-base-superb-er` — collapsed to "angry" on nearly all real mic
+  clips (trained on studio-acted IEMOCAP; poor real-world generalization).
+- `ehcalabres/wav2vec2-lg-xlsr-en-speech-emotion-recognition` — its trained
+  classifier head doesn't load through the standard `pipeline`, so predictions are
+  random (uniform ~0.12 across classes).
+
+The live mechanism for tone is the **emotion confirm popup** (`EmotionConfirm.jsx`):
+the sender taps how they said it — reliable and one tap. To revisit auto-detection,
+options are: load ehcalabres' custom model class properly, fine-tune on real data,
+or use a paid API (e.g. Hume). To re-enable once a good model is found:
+
+```bash
+cd voice-service && SER_MODEL=<good-model> ./run-emotion.sh   # serves on :8002
+# then uncomment EMOTION_URL=http://127.0.0.1:8002 in server/.env and restart the backend
+```
+
 OpenVoice (also MIT) remains a documented fallback if Chatterbox disappoints — not built.

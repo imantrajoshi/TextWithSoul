@@ -5,6 +5,7 @@ import path from 'path';
 import { EMOTION_VOICE_SETTINGS } from '../constants/emotionVoiceSettings.js';
 import { trackHume, trackElevenLabs, getUsage } from '../utils/usageTracker.js';
 import { analyzeText } from '../utils/emotionAnalyzer.js';
+import { detectVoiceEmotion } from '../utils/voiceEmotion.js';
 import {
   resolveReference,
   cloneViaService,
@@ -174,35 +175,39 @@ const neutralResult = (text) => ({
 });
 
 // POST /api/voice/analyze
-// Emotion for a VOICE message. The transcript (free Web Speech text) is the
-// PRIMARY, reliable signal — it understands the words and supports multiple
-// emotions per message. Hume prosody (voice tone) is consulted only when the
-// text is neutral AND a real (non-mock) result is available — the random mock
-// can never override the text. Transcription itself is NOT done here.
+// Emotion for a VOICE message, from two signals:
+//   - WORDS: free local text analysis (supports the 7 emotions + mixed).
+//   - TONE:  free local Speech Emotion Recognition on the recording (neu/happy/
+//            angry/sad) — catches an angry/sad delivery even with neutral words.
+// Tone LEADS when the words are flat (low bar) or when it's strongly confident
+// (high bar), otherwise the richer text result wins. Transcription is NOT done
+// here, and the raw recording is discarded after analysis (BRIEF §3B.6 / §4).
 export const analyzeVoice = async (req, res) => {
   try {
     const text = (req.body?.text || '').trim();
     let result = text ? analyzeText(text) : null;
 
-    // Only reach for voice-tone when the words gave us nothing.
-    if ((!result || result.emotion === 'neutral') && req.file) {
-      const { emotions, mocked } = await analyzeEmotion(req.file.buffer);
-      if (!mocked && emotions?.length) {
-        const mapped = mapHumeToVybe(emotions);
-        if (mapped.emotion !== 'neutral') {
+    if (req.file?.buffer?.length) {
+      const voice = await detectVoiceEmotion(req.file.buffer);
+      if (voice && voice.emotion !== 'neutral') {
+        const textNeutral = !result || result.emotion === 'neutral';
+        // Low bar to fill a neutral guess; high bar to override a confident text guess.
+        const strongEnough = textNeutral ? voice.score >= 0.4 : voice.score >= 0.65;
+        if (strongEnough) {
+          const intensity = Number(voice.score.toFixed(2));
           result = {
-            ...mapped,
-            segments: text ? [{ text, emotion: mapped.emotion, emotionIntensity: mapped.emotionIntensity }] : [],
-            emotions: [mapped.emotion],
+            emotion: voice.emotion,
+            emotionIntensity: intensity,
+            segments: text ? [{ text, emotion: voice.emotion, emotionIntensity: intensity }] : [],
+            emotions: [voice.emotion],
             isMixed: false,
+            isUncertain: false,
+            uncertaintyOptions: null,
           };
         }
       }
     }
 
-    // The raw recording is used ONLY for analysis and is then discarded — it is
-    // never stored or played back (PROJECT BRIEF §3B.6 / §4). Playback uses the
-    // sender's enrolled voice clone instead.
     res.status(200).json(result || neutralResult(text));
   } catch (error) {
     console.error('Emotion analysis error:', error);
