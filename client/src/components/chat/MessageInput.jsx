@@ -99,27 +99,41 @@ export default function MessageInput({ conversationId, onSend }) {
   // still sent to the server, but only for emotion analysis — not transcription.
   // PRODUCTION: swap to a paid/on-device model (e.g. Whisper) for privacy and
   // cross-browser support.
-  // Initialize Speech Recognition
-  useEffect(() => {
-    if (typeof window !== 'undefined' && ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)) {
-      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-      recognitionRef.current = new SpeechRecognition();
-      recognitionRef.current.continuous = true;
-      recognitionRef.current.interimResults = true;
-      
-      recognitionRef.current.onresult = (event) => {
-        let currentTranscript = '';
-        for (let i = 0; i < event.results.length; i++) {
-          currentTranscript += event.results[i][0].transcript;
-        }
-        setText(currentTranscript);
-      };
+  //
+  // A FRESH recognizer is created per recording (see startRecording). Reusing a
+  // single SpeechRecognition instance across recordings is unreliable — the 2nd
+  // session typically yields no transcript in Chrome/Safari, which made emotion
+  // detection come back neutral on every recording after the first.
+  const createRecognition = () => {
+    if (typeof window === 'undefined') return null;
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) return null;
+    const rec = new SR();
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.onresult = (event) => {
+      let transcript = '';
+      for (let i = 0; i < event.results.length; i++) {
+        transcript += event.results[i][0].transcript;
+      }
+      setText(transcript);
+    };
+    rec.onerror = (event) => {
+      console.error('Speech recognition error:', event.error);
+    };
+    return rec;
+  };
 
-      recognitionRef.current.onerror = (event) => {
-        console.error('Speech recognition error:', event.error);
-      };
+  const stopRecognition = () => {
+    const rec = recognitionRef.current;
+    if (!rec) return;
+    try {
+      rec.stop();
+    } catch {
+      /* already stopped */
     }
-  }, []);
+    recognitionRef.current = null;
+  };
 
   const startRecording = async () => {
     if (isTranscribing) return;
@@ -148,11 +162,9 @@ export default function MessageInput({ conversationId, onSend }) {
       mediaRecorder.onstop = async () => {
         stream.getTracks().forEach(track => track.stop());
         clearInterval(timerRef.current);
-        
-        if (recognitionRef.current) {
-          recognitionRef.current.stop();
-        }
-        
+
+        stopRecognition();
+
         const duration = currentDurationRef.current;
         setRecordingTime(0);
 
@@ -169,8 +181,14 @@ export default function MessageInput({ conversationId, onSend }) {
       };
 
       mediaRecorder.start();
+      // Fresh recognizer for THIS recording — reusing one breaks after the first.
+      recognitionRef.current = createRecognition();
       if (recognitionRef.current) {
-        recognitionRef.current.start();
+        try {
+          recognitionRef.current.start();
+        } catch (err) {
+          console.error('Speech recognition start failed:', err);
+        }
       }
       setIsRecording(true);
       
@@ -199,9 +217,7 @@ export default function MessageInput({ conversationId, onSend }) {
       setConfirmEmotion(null);
       setPendingEmotion(null);
     }
-    if (recognitionRef.current) {
-      recognitionRef.current.stop();
-    }
+    stopRecognition();
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop();
     }
