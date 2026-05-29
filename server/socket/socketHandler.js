@@ -45,7 +45,7 @@ const socketHandler = (io) => {
     // Send a message
     socket.on('message:send', async (data) => {
       try {
-        const { conversationId, text, emotion, emotionIntensity } = data;
+        const { conversationId, text, emotion, emotionIntensity, voiceClipId } = data;
 
         if (!conversationId || !text || !text.trim()) return;
 
@@ -78,6 +78,11 @@ const socketHandler = (io) => {
           resolvedSegments = [{ text: text.trim(), emotion: resolvedEmotion, emotionIntensity: resolvedIntensity }];
         }
 
+        // Voice-message recording id (uuid), for cloning playback from the
+        // actual recording. Validated to prevent path traversal.
+        const safeVoiceClipId =
+          typeof voiceClipId === 'string' && /^[0-9a-f-]{36}$/i.test(voiceClipId) ? voiceClipId : '';
+
         // Create message
         const message = await Message.create({
           conversationId,
@@ -86,6 +91,7 @@ const socketHandler = (io) => {
           emotion: resolvedEmotion,
           emotionIntensity: resolvedIntensity,
           segments: resolvedSegments,
+          voiceClipId: safeVoiceClipId,
           readBy: [userId],
         });
 

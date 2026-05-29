@@ -2,6 +2,7 @@ import WebSocket from 'ws';
 import axios from 'axios';
 import fs from 'fs/promises';
 import path from 'path';
+import { randomUUID } from 'crypto';
 import { EMOTION_VOICE_SETTINGS } from '../constants/emotionVoiceSettings.js';
 import { trackHume, trackElevenLabs, getUsage } from '../utils/usageTracker.js';
 import { analyzeText } from '../utils/emotionAnalyzer.js';
@@ -192,11 +193,29 @@ export const analyzeVoice = async (req, res) => {
       }
     }
 
-    res.status(200).json(result || neutralResult(text));
+    const finalResult = result || neutralResult(text);
+
+    // VOICE-MESSAGE LANE: persist the recording so playback can clone from this
+    // exact clip (carrying the real emotion of how it was said). Returns an id
+    // the client sends back with the message.
+    let voiceClipId = null;
+    if (req.file?.buffer?.length) {
+      try {
+        voiceClipId = randomUUID();
+        const dir = path.join(process.cwd(), 'uploads', 'voice-messages', String(req.user._id));
+        await fs.mkdir(dir, { recursive: true });
+        await fs.writeFile(path.join(dir, `${voiceClipId}.webm`), req.file.buffer);
+      } catch (e) {
+        console.warn('[VoiceLane] failed to persist voice clip:', e.message);
+        voiceClipId = null;
+      }
+    }
+
+    res.status(200).json({ ...finalResult, voiceClipId });
   } catch (error) {
     console.error('Emotion analysis error:', error);
     // Never block sending a message — degrade silently to neutral.
-    res.status(200).json(neutralResult((req.body?.text || '').trim()));
+    res.status(200).json({ ...neutralResult((req.body?.text || '').trim()), voiceClipId: null });
   }
 };
 
@@ -231,15 +250,32 @@ const findReferenceSample = async (senderId, emotion) => {
   return null;
 };
 
+// VOICE-MESSAGE LANE: the actual recording the sender made for THIS message,
+// used as the clone reference so playback carries the real emotion of how it
+// was said. Returns null if there's no such clip (e.g. a typed message).
+const findVoiceMessageClip = async (senderId, voiceClipId) => {
+  if (!senderId || !/^[a-f0-9]{24}$/i.test(String(senderId))) return null;
+  if (!voiceClipId || !/^[0-9a-f-]{36}$/i.test(String(voiceClipId))) return null;
+  const p = path.join(process.cwd(), 'uploads', 'voice-messages', String(senderId), `${voiceClipId}.webm`);
+  try {
+    await fs.access(p);
+    return p;
+  } catch {
+    return null;
+  }
+};
+
 // POST /api/voice/synthesize
 // Voice playback, in order of preference:
 //   1. FREE self-hosted XTTS clone (VOICE_CLONE_URL) — the sender's OWN voice.
+//      Reference clip: the message's own recording (voice lane) if present,
+//      otherwise the sender's enrolled sample for the emotion (typed lane).
 //   2. PAID ElevenLabs (default voice) when a key is set.
 //   3. 503 { fallback: 'browser-tts' } → client uses the free browser voice.
 // Each tier degrades gracefully to the next, so playback never hard-fails.
 export const synthesizeAudio = async (req, res) => {
   try {
-    const { text, emotion, voiceCloneId, senderId } = req.body;
+    const { text, emotion, voiceCloneId, senderId, voiceClipId } = req.body;
 
     if (!text) {
       return res.status(400).json({ message: 'No text provided for synthesis' });
@@ -249,7 +285,9 @@ export const synthesizeAudio = async (req, res) => {
     const cloneUrl = process.env.VOICE_CLONE_URL;
     if (cloneUrl) {
       try {
-        const refPath = await findReferenceSample(senderId, emotion);
+        const refPath =
+          (await findVoiceMessageClip(senderId, voiceClipId)) ||
+          (await findReferenceSample(senderId, emotion));
         if (refPath) {
           const buf = await fs.readFile(refPath);
           const form = new FormData();

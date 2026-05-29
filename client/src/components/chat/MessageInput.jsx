@@ -24,6 +24,7 @@ export default function MessageInput({ conversationId, onSend }) {
   const audioChunksRef = useRef([]);
   const timerRef = useRef(null);
   const typedTimerRef = useRef(null);
+  const voiceClipIdRef = useRef(null);
 
   const currentDurationRef = useRef(0);
 
@@ -67,10 +68,12 @@ export default function MessageInput({ conversationId, onSend }) {
       text: trimmed,
       emotion: pendingEmotion?.emotion || 'neutral',
       emotionIntensity: pendingEmotion?.emotionIntensity || 0,
-      segments: pendingEmotion?.segments || []
+      segments: pendingEmotion?.segments || [],
+      voiceClipId: voiceClipIdRef.current || undefined
     });
 
     if (typedTimerRef.current) clearTimeout(typedTimerRef.current);
+    voiceClipIdRef.current = null;
     setText('');
     setPendingEmotion(null);
     setUncertaintyData(null);
@@ -116,6 +119,7 @@ export default function MessageInput({ conversationId, onSend }) {
     
     setMicError('');
     setText(''); // Clear previous text when starting new recording
+    voiceClipIdRef.current = null; // new recording → drop any prior clip id
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' });
@@ -176,8 +180,9 @@ export default function MessageInput({ conversationId, onSend }) {
   const stopRecording = (discard = false) => {
     if (!isRecording) return;
     if (discard) {
-      audioChunksRef.current = []; 
+      audioChunksRef.current = [];
       setText(''); // Clear text if discarded
+      voiceClipIdRef.current = null;
     }
     if (recognitionRef.current) {
       recognitionRef.current.stop();
@@ -209,6 +214,7 @@ export default function MessageInput({ conversationId, onSend }) {
   const scheduleTypedAnalysis = (value) => {
     if (typedTimerRef.current) clearTimeout(typedTimerRef.current);
     if (!value.trim()) {
+      voiceClipIdRef.current = null; // cleared input → no recording applies
       setPendingEmotion(null);
       return;
     }
@@ -243,6 +249,9 @@ export default function MessageInput({ conversationId, onSend }) {
       const res = await api.post('/voice/analyze', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
+
+      // Keep the stored-recording id so playback can clone from this exact clip.
+      voiceClipIdRef.current = res.data.voiceClipId || null;
 
       // Text is already populated live by the Web Speech API; the server only
       // returns the detected emotion(s) here.

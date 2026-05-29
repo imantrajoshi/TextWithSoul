@@ -49,6 +49,13 @@ const messageSchema = new mongoose.Schema(
       type: [segmentSchema],
       default: [],
     },
+    // For VOICE messages: the stored recording (under uploads/voice-messages/
+    // <senderId>/<voiceClipId>.webm) used as the clone reference at playback,
+    // so it carries the exact emotion of how the sender actually said it.
+    voiceClipId: {
+      type: String,
+      default: '',
+    },
     audioProcessed: {
       type: Boolean,
       default: false,
