@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { useSocket } from '../../context/SocketContext';
 import api from '../../services/api';
 import UncertaintyPopup from './UncertaintyPopup';
+import EmotionConfirm from './EmotionConfirm';
 
 export default function MessageInput({ conversationId, onSend }) {
   const [text, setText] = useState('');
@@ -14,6 +15,8 @@ export default function MessageInput({ conversationId, onSend }) {
   // Phase 3 Emotion State
   const [pendingEmotion, setPendingEmotion] = useState(null);
   const [uncertaintyData, setUncertaintyData] = useState(null);
+  // Voice notes: ask the sender to confirm/correct the emotion before sending.
+  const [confirmEmotion, setConfirmEmotion] = useState(null);
   
   const { emit } = useSocket();
   const typingTimeoutRef = useRef(null);
@@ -64,11 +67,14 @@ export default function MessageInput({ conversationId, onSend }) {
     }
 
     // Call onSend with the resolved payload (including per-sentence segments).
+    // emotionConfirmed=true means the sender explicitly picked the emotion, so
+    // the server should trust it verbatim instead of re-reading the words.
     onSend({
       text: trimmed,
       emotion: pendingEmotion?.emotion || 'neutral',
       emotionIntensity: pendingEmotion?.emotionIntensity || 0,
       segments: pendingEmotion?.segments || [],
+      emotionConfirmed: pendingEmotion?.confirmed || false,
       voiceClipId: voiceClipIdRef.current || undefined
     });
 
@@ -77,6 +83,7 @@ export default function MessageInput({ conversationId, onSend }) {
     setText('');
     setPendingEmotion(null);
     setUncertaintyData(null);
+    setConfirmEmotion(null);
     
     if (inputRef.current) {
       inputRef.current.style.height = 'auto';
@@ -120,6 +127,7 @@ export default function MessageInput({ conversationId, onSend }) {
     setMicError('');
     setText(''); // Clear previous text when starting new recording
     voiceClipIdRef.current = null; // new recording → drop any prior clip id
+    setConfirmEmotion(null);
     try {
       // Disable the browser's voice DSP — noise suppression / auto-gain /
       // echo cancellation thin out the low end and lift perceived pitch, which
@@ -188,6 +196,8 @@ export default function MessageInput({ conversationId, onSend }) {
       audioChunksRef.current = [];
       setText(''); // Clear text if discarded
       voiceClipIdRef.current = null;
+      setConfirmEmotion(null);
+      setPendingEmotion(null);
     }
     if (recognitionRef.current) {
       recognitionRef.current.stop();
@@ -258,23 +268,19 @@ export default function MessageInput({ conversationId, onSend }) {
       // Keep the stored-recording id so playback can clone from this exact clip.
       voiceClipIdRef.current = res.data.voiceClipId || null;
 
-      // Text is already populated live by the Web Speech API; the server only
-      // returns the detected emotion(s) here.
-      if (res.data.isUncertain) {
-        setUncertaintyData({
-          options: res.data.uncertaintyOptions,
-          defaultEmotion: res.data.emotion,
-          intensity: res.data.emotionIntensity
-        });
-      } else {
-        setPendingEmotion({
-          emotion: res.data.emotion || 'neutral',
-          emotionIntensity: res.data.emotionIntensity || 0,
-          segments: res.data.segments || [],
-          emotions: res.data.emotions || [],
-          isMixed: !!res.data.isMixed,
-        });
-      }
+      // Provisional detection (used if the sender dismisses the confirm popup).
+      const detected = res.data.emotion || 'neutral';
+      setPendingEmotion({
+        emotion: detected,
+        emotionIntensity: res.data.emotionIntensity || 0,
+        segments: res.data.segments || [],
+        emotions: res.data.emotions || [],
+        isMixed: !!res.data.isMixed,
+        confirmed: false,
+      });
+      // Ask the sender to confirm/correct how they said it — the words can miss
+      // the tone (e.g. an angry voice with neutral words).
+      setConfirmEmotion({ detected });
 
       setTimeout(() => {
         if (inputRef.current) {
@@ -308,6 +314,26 @@ export default function MessageInput({ conversationId, onSend }) {
     setUncertaintyData(null);
   };
 
+  // Sender picked an emotion for a voice note → trust it (sent as "confirmed").
+  const handleEmotionConfirm = (emotion) => {
+    setPendingEmotion((prev) => ({
+      emotion,
+      emotionIntensity: prev?.emotion === emotion ? (prev.emotionIntensity || 0.8) : 0.8,
+      segments: [{ text, emotion, emotionIntensity: 0.8 }],
+      emotions: emotion !== 'neutral' ? [emotion] : [],
+      isMixed: false,
+      confirmed: true,
+    }));
+    setConfirmEmotion(null);
+    inputRef.current?.focus();
+  };
+
+  // Sender dismissed → keep the auto-detected emotion (not confirmed).
+  const handleEmotionConfirmDismiss = () => {
+    setConfirmEmotion(null);
+    inputRef.current?.focus();
+  };
+
   const getEmojiForEmotion = (emo) => {
     const map = { excited: '⚡', happy: '😊', sad: '💙', angry: '🔴', anxious: '😰', loving: '🌸', neutral: '' };
     return map[emo] || '';
@@ -317,16 +343,23 @@ export default function MessageInput({ conversationId, onSend }) {
     <div className="relative">
       <AnimatePresence>
         {uncertaintyData && (
-          <UncertaintyPopup 
-            options={uncertaintyData.options} 
-            onSelect={handleUncertaintySelect} 
-            onDismiss={handleUncertaintyDismiss} 
+          <UncertaintyPopup
+            options={uncertaintyData.options}
+            onSelect={handleUncertaintySelect}
+            onDismiss={handleUncertaintyDismiss}
+          />
+        )}
+        {confirmEmotion && !isRecording && !isTranscribing && (
+          <EmotionConfirm
+            detected={confirmEmotion.detected}
+            onSelect={handleEmotionConfirm}
+            onDismiss={handleEmotionConfirmDismiss}
           />
         )}
       </AnimatePresence>
 
       {/* Tiny pending indicator */}
-      {pendingEmotion && (pendingEmotion.emotion !== 'neutral' || pendingEmotion.isMixed) && !isRecording && !isTranscribing && (
+      {pendingEmotion && !confirmEmotion && (pendingEmotion.emotion !== 'neutral' || pendingEmotion.isMixed) && !isRecording && !isTranscribing && (
         <div className="absolute -top-7 right-4 bg-bg-elevated border border-border-subtle rounded-full px-2.5 py-1 text-xs shadow-sm flex items-center gap-1.5 text-text-secondary animate-fade-in z-10">
           {pendingEmotion.isMixed && pendingEmotion.emotions?.length > 1 ? (
             <>

@@ -298,7 +298,11 @@ export default function MessageBubble({
               px-4 py-2.5 break-words rounded-2xl ${radiusClass} ${bubbleClass}
             `}
           >
-            <p className={`whitespace-pre-wrap ${style.text}`}>{message.text}</p>
+            {/* Received bubbles get the emotion's text colour; sent bubbles keep
+                white text on their solid emotion-coloured background. */}
+            <p className={`whitespace-pre-wrap ${style.text} ${!isMine ? (emotionTextColor[currentEmotion] || '') : ''}`}>
+              {message.text}
+            </p>
           </div>
         )}
 
@@ -320,13 +324,13 @@ export default function MessageBubble({
 
           {isMixed ? (
             distinctEmotions.map((e) => (
-              <span key={e} className="text-[11px] font-medium text-text-secondary bg-bg-tertiary px-1.5 py-0.5 rounded-full flex items-center gap-1 opacity-70">
+              <span key={e} className={`text-[11px] font-semibold bg-bg-tertiary px-1.5 py-0.5 rounded-full flex items-center gap-1 capitalize ${emotionTextColor[e] || 'text-text-secondary'}`}>
                 {getEmojiForEmotion(e)} {e}
               </span>
             ))
           ) : (
             emotion && emotion !== 'neutral' && (
-              <span className="text-[11px] font-medium text-text-secondary bg-bg-tertiary px-1.5 py-0.5 rounded-full flex items-center gap-1 opacity-70">
+              <span className={`text-[11px] font-semibold bg-bg-tertiary px-1.5 py-0.5 rounded-full flex items-center gap-1 capitalize ${emotionTextColor[emotion] || 'text-text-secondary'}`}>
                 {getEmojiForEmotion(emotion)} {emotion}
               </span>
             )

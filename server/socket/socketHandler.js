@@ -47,7 +47,7 @@ const socketHandler = (io) => {
     // Send a message
     socket.on('message:send', async (data) => {
       try {
-        const { conversationId, text, emotion, emotionIntensity, voiceClipId } = data;
+        const { conversationId, text, emotion, emotionIntensity, voiceClipId, emotionConfirmed } = data;
 
         if (!conversationId || !text || !text.trim()) return;
 
@@ -59,25 +59,30 @@ const socketHandler = (io) => {
 
         if (!conversation) return;
 
-        // Emotion is resolved AUTHORITATIVELY on the server so every message gets
-        // emotion + per-sentence segments regardless of client timing (e.g. a typed
-        // message sent before the client's debounced preview finished).
         const ALLOWED_EMOTIONS = ['excited', 'happy', 'sad', 'angry', 'anxious', 'loving', 'neutral'];
-        const analysis = analyzeText(text);
-        let resolvedEmotion = analysis.emotion;
-        let resolvedIntensity = analysis.emotionIntensity;
-        let resolvedSegments = analysis.segments;
+        let resolvedEmotion, resolvedIntensity, resolvedSegments;
 
-        // If the words were neutral but the client detected something (e.g. voice
-        // tone from Hume prosody), honour the client's hint.
-        if (
-          resolvedEmotion === 'neutral' &&
-          ALLOWED_EMOTIONS.includes(emotion) &&
-          emotion !== 'neutral'
-        ) {
+        if (emotionConfirmed === true && ALLOWED_EMOTIONS.includes(emotion)) {
+          // The sender explicitly confirmed the emotion (voice-note popup) — trust
+          // it verbatim, over the text analysis. This is how an angry tone with
+          // neutral words still comes through as angry.
           resolvedEmotion = emotion;
-          resolvedIntensity = typeof emotionIntensity === 'number' ? emotionIntensity : 0;
+          resolvedIntensity = typeof emotionIntensity === 'number' ? emotionIntensity : 0.8;
           resolvedSegments = [{ text: text.trim(), emotion: resolvedEmotion, emotionIntensity: resolvedIntensity }];
+        } else {
+          // Otherwise resolve AUTHORITATIVELY from the words so every message gets
+          // emotion + per-sentence segments regardless of client timing.
+          const analysis = analyzeText(text);
+          resolvedEmotion = analysis.emotion;
+          resolvedIntensity = analysis.emotionIntensity;
+          resolvedSegments = analysis.segments;
+
+          // If the words were neutral but the client detected something, honour it.
+          if (resolvedEmotion === 'neutral' && ALLOWED_EMOTIONS.includes(emotion) && emotion !== 'neutral') {
+            resolvedEmotion = emotion;
+            resolvedIntensity = typeof emotionIntensity === 'number' ? emotionIntensity : 0;
+            resolvedSegments = [{ text: text.trim(), emotion: resolvedEmotion, emotionIntensity: resolvedIntensity }];
+          }
         }
 
         // Voice-message recording id (uuid), for cloning playback from the
