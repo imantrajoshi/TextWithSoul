@@ -2,9 +2,12 @@ import { motion } from 'motion/react';
 
 // Shown after a VOICE note is recorded: lets the sender confirm (or correct) the
 // emotion, since the words alone can miss how it was actually said — e.g. an
-// angry tone with neutral words. The detected emotion is pre-highlighted; one
-// tap keeps or changes it. The chosen emotion is sent as "confirmed" and drives
-// both the bubble styling and the cloned-voice expressiveness.
+// angry tone with neutral words. The chosen emotion is sent as "confirmed" and
+// drives both the bubble styling and the cloned-voice expressiveness.
+//
+// If detection found MULTIPLE emotions, a "Keep mixed" option is offered (and is
+// the default): keeping it preserves the per-sentence breakdown; tapping a single
+// emotion collapses the whole message to that one.
 const EMOTIONS = [
   { key: 'happy', emoji: '😊', label: 'Happy' },
   { key: 'excited', emoji: '⚡', label: 'Excited' },
@@ -15,7 +18,9 @@ const EMOTIONS = [
   { key: 'neutral', emoji: '💬', label: 'Neutral' },
 ];
 
-export default function EmotionConfirm({ detected, onSelect, onDismiss }) {
+const emojiFor = (key) => EMOTIONS.find((e) => e.key === key)?.emoji || '';
+
+export default function EmotionConfirm({ detected, isMixed = false, emotions = [], onSelect, onDismiss }) {
   return (
     <motion.div
       initial={{ opacity: 0, y: 10, scale: 0.95 }}
@@ -39,21 +44,34 @@ export default function EmotionConfirm({ detected, onSelect, onDismiss }) {
       </div>
 
       <div className="flex flex-wrap gap-2">
-        {EMOTIONS.map((e) => (
+        {isMixed && (
           <button
-            key={e.key}
             type="button"
-            onClick={() => onSelect(e.key)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-medium transition-colors ${
-              e.key === detected
-                ? 'bg-accent text-white shadow-sm'
-                : 'bg-bg-tertiary text-text-secondary hover:bg-bg-secondary'
-            }`}
+            onClick={() => onSelect('mixed')}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-medium transition-colors bg-accent text-white shadow-sm"
           >
-            <span>{e.emoji}</span>
-            <span>{e.label}</span>
+            <span>{emotions.map(emojiFor).join(' ')}</span>
+            <span>Keep mixed</span>
           </button>
-        ))}
+        )}
+        {EMOTIONS.map((e) => {
+          const highlighted = !isMixed && e.key === detected;
+          return (
+            <button
+              key={e.key}
+              type="button"
+              onClick={() => onSelect(e.key)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-medium transition-colors ${
+                highlighted
+                  ? 'bg-accent text-white shadow-sm'
+                  : 'bg-bg-tertiary text-text-secondary hover:bg-bg-secondary'
+              }`}
+            >
+              <span>{e.emoji}</span>
+              <span>{e.label}</span>
+            </button>
+          );
+        })}
       </div>
     </motion.div>
   );

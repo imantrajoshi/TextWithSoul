@@ -47,7 +47,7 @@ const socketHandler = (io) => {
     // Send a message
     socket.on('message:send', async (data) => {
       try {
-        const { conversationId, text, emotion, emotionIntensity, voiceClipId, emotionConfirmed } = data;
+        const { conversationId, text, emotion, emotionIntensity, voiceClipId, emotionConfirmed, segments } = data;
 
         if (!conversationId || !text || !text.trim()) return;
 
@@ -68,7 +68,21 @@ const socketHandler = (io) => {
           // neutral words still comes through as angry.
           resolvedEmotion = emotion;
           resolvedIntensity = typeof emotionIntensity === 'number' ? emotionIntensity : 0.8;
-          resolvedSegments = [{ text: text.trim(), emotion: resolvedEmotion, emotionIntensity: resolvedIntensity }];
+
+          // If they kept a MIXED breakdown, preserve their per-sentence segments;
+          // otherwise collapse the whole message to the single confirmed emotion.
+          const cleanSegments = Array.isArray(segments)
+            ? segments.slice(0, 40).map((s) => ({
+                text: typeof s?.text === 'string' ? s.text.slice(0, 1000) : '',
+                emotion: ALLOWED_EMOTIONS.includes(s?.emotion) ? s.emotion : 'neutral',
+                emotionIntensity:
+                  typeof s?.emotionIntensity === 'number' ? Math.max(0, Math.min(1, s.emotionIntensity)) : 0,
+              })).filter((s) => s.text)
+            : [];
+          resolvedSegments =
+            cleanSegments.length > 1
+              ? cleanSegments
+              : [{ text: text.trim(), emotion: resolvedEmotion, emotionIntensity: resolvedIntensity }];
         } else {
           // Otherwise resolve AUTHORITATIVELY from the words so every message gets
           // emotion + per-sentence segments regardless of client timing.

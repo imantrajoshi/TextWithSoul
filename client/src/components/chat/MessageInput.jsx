@@ -295,8 +295,14 @@ export default function MessageInput({ conversationId, onSend }) {
         confirmed: false,
       });
       // Ask the sender to confirm/correct how they said it — the words can miss
-      // the tone (e.g. an angry voice with neutral words).
-      setConfirmEmotion({ detected });
+      // the tone (e.g. an angry voice with neutral words). Carry the mixed
+      // breakdown so the popup can offer "Keep mixed".
+      setConfirmEmotion({
+        detected,
+        isMixed: !!res.data.isMixed,
+        emotions: res.data.emotions || [],
+        segments: res.data.segments || [],
+      });
 
       setTimeout(() => {
         if (inputRef.current) {
@@ -330,16 +336,28 @@ export default function MessageInput({ conversationId, onSend }) {
     setUncertaintyData(null);
   };
 
-  // Sender picked an emotion for a voice note → trust it (sent as "confirmed").
-  const handleEmotionConfirm = (emotion) => {
-    setPendingEmotion((prev) => ({
-      emotion,
-      emotionIntensity: prev?.emotion === emotion ? (prev.emotionIntensity || 0.8) : 0.8,
-      segments: [{ text, emotion, emotionIntensity: 0.8 }],
-      emotions: emotion !== 'neutral' ? [emotion] : [],
-      isMixed: false,
-      confirmed: true,
-    }));
+  // Sender confirmed for a voice note → trust it (sent as "confirmed").
+  // 'mixed' keeps the detected per-sentence breakdown; otherwise collapse to one.
+  const handleEmotionConfirm = (value) => {
+    if (value === 'mixed') {
+      setPendingEmotion((prev) => ({
+        emotion: prev?.emotion || confirmEmotion?.detected || 'neutral',
+        emotionIntensity: prev?.emotionIntensity || 0.8,
+        segments: confirmEmotion?.segments || [],
+        emotions: confirmEmotion?.emotions || [],
+        isMixed: true,
+        confirmed: true,
+      }));
+    } else {
+      setPendingEmotion({
+        emotion: value,
+        emotionIntensity: 0.8,
+        segments: [{ text, emotion: value, emotionIntensity: 0.8 }],
+        emotions: value !== 'neutral' ? [value] : [],
+        isMixed: false,
+        confirmed: true,
+      });
+    }
     setConfirmEmotion(null);
     inputRef.current?.focus();
   };
@@ -368,6 +386,8 @@ export default function MessageInput({ conversationId, onSend }) {
         {confirmEmotion && !isRecording && !isTranscribing && (
           <EmotionConfirm
             detected={confirmEmotion.detected}
+            isMixed={confirmEmotion.isMixed}
+            emotions={confirmEmotion.emotions}
             onSelect={handleEmotionConfirm}
             onDismiss={handleEmotionConfirmDismiss}
           />
