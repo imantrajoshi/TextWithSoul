@@ -40,4 +40,36 @@ it in the sender's enrolled voice for that emotion.
 - **CPU inference** on a Mac is a few seconds per message; the client caches
   generated audio so replays are instant.
 - **License:** XTTS-v2 is **non-commercial**. Fine for this prototype/demo;
-  swap to OpenVoice (MIT) or a commercial TTS before a paid launch.
+  the Chatterbox spike below is the license-safe path.
+
+---
+
+# Chatterbox engine (MIT) — license-safe alternative [SPIKE]
+
+`app_chatterbox.py` is a drop-in alternative running **Chatterbox (Resemble AI)**,
+which is **MIT-licensed (commercial OK)**. It exposes the **same `/synthesize`
+contract** as the XTTS service, so swapping engines is just changing which port
+`VOICE_CLONE_URL` points at — the Node backend doesn't change.
+
+```bash
+brew install ffmpeg
+brew install python@3.11      # Chatterbox needs Python >=3.10
+cd voice-service
+./run-chatterbox.sh           # separate venv (.venv-chatterbox), serves on :8001
+```
+
+To use it instead of XTTS, set in `server/.env`:
+
+```
+VOICE_CLONE_URL=http://127.0.0.1:8001
+```
+
+Differences vs XTTS:
+- **License:** MIT (commercial OK) vs XTTS non-commercial. This is the reason to swap.
+- **Emotion:** Chatterbox controls emotion via an `exaggeration` knob (0–1, default
+  0.5), **not** from the reference clip's prosody. Follow-up if we ship: map our
+  detected emotion → `exaggeration`. The `/synthesize` endpoint already accepts an
+  optional `exaggeration` form field.
+- Cloning is zero-shot from a ~5s reference, same as XTTS. CPU inference on a Mac.
+
+OpenVoice (also MIT) remains a documented fallback if Chatterbox disappoints — not built.

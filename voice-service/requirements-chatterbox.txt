@@ -1,0 +1,7 @@
+# Chatterbox (Resemble AI) — MIT-licensed voice clone. Pulls torch/torchaudio +
+# transformers at the versions it pins. Needs Python >=3.10 (use python@3.11).
+chatterbox-tts
+setuptools<81       # <81 still ships pkg_resources, needed by resemble-perth's watermarker
+fastapi>=0.110
+uvicorn[standard]>=0.29
+python-multipart>=0.0.9
