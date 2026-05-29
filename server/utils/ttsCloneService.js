@@ -63,23 +63,11 @@ const findStableReference = async (senderId) => {
   return null;
 };
 
-// The actual recording the sender made for THIS message (voice lane).
-const findVoiceMessageClip = async (senderId, voiceClipId) => {
-  if (!senderId || !/^[a-f0-9]{24}$/i.test(String(senderId))) return null;
-  if (!voiceClipId || !/^[0-9a-f-]{36}$/i.test(String(voiceClipId))) return null;
-  const p = path.join(process.cwd(), 'uploads', 'voice-messages', String(senderId), `${voiceClipId}.webm`);
-  try {
-    await fs.access(p);
-    return p;
-  } catch {
-    return null;
-  }
-};
-
-// Pick the clone reference: the message's own recording (voice lane) if present,
-// else the sender's stable identity sample (typed lane). Returns a path or null.
-export const resolveReference = async ({ senderId, voiceClipId }) =>
-  (await findVoiceMessageClip(senderId, voiceClipId)) || (await findStableReference(senderId));
+// The clone reference is ALWAYS the sender's permanent enrolled voice identity.
+// We never clone from a per-message recording — the raw voice is not stored or
+// played back (see PROJECT BRIEF §3B.6 / §4); only the sender's voice clone speaks
+// the text. Returns a path or null.
+export const resolveReference = async ({ senderId }) => findStableReference(senderId);
 
 // Call the local clone service (Chatterbox or XTTS — same HTTP contract).
 // `exaggeration` (derived from emotion) is used by Chatterbox and ignored by
@@ -102,10 +90,10 @@ export const cloneViaService = async ({ text, refPath, language = 'en', emotion 
 
 // Generate the cloned wav for a message and write it to the disk cache.
 // Returns the cache path. Throws if there's no reference or the clone fails.
-export const generateAndCache = async ({ messageId, text, senderId, emotion, voiceClipId }) => {
+export const generateAndCache = async ({ messageId, text, senderId, emotion }) => {
   if (!isValidMessageId(messageId)) throw new Error('invalid messageId');
-  const refPath = await resolveReference({ senderId, voiceClipId });
-  if (!refPath) throw new Error('no reference clip for sender');
+  const refPath = await resolveReference({ senderId });
+  if (!refPath) throw new Error('no enrolled voice for sender');
   const wav = await cloneViaService({ text, refPath, emotion });
   await fs.mkdir(ttsCacheDir(), { recursive: true });
   const out = cachePathFor(messageId);

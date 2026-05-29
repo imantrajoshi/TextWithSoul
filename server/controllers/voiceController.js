@@ -2,7 +2,6 @@ import WebSocket from 'ws';
 import axios from 'axios';
 import fs from 'fs/promises';
 import path from 'path';
-import { randomUUID } from 'crypto';
 import { EMOTION_VOICE_SETTINGS } from '../constants/emotionVoiceSettings.js';
 import { trackHume, trackElevenLabs, getUsage } from '../utils/usageTracker.js';
 import { analyzeText } from '../utils/emotionAnalyzer.js';
@@ -201,29 +200,14 @@ export const analyzeVoice = async (req, res) => {
       }
     }
 
-    const finalResult = result || neutralResult(text);
-
-    // VOICE-MESSAGE LANE: persist the recording so playback can clone from this
-    // exact clip (carrying the real emotion of how it was said). Returns an id
-    // the client sends back with the message.
-    let voiceClipId = null;
-    if (req.file?.buffer?.length) {
-      try {
-        voiceClipId = randomUUID();
-        const dir = path.join(process.cwd(), 'uploads', 'voice-messages', String(req.user._id));
-        await fs.mkdir(dir, { recursive: true });
-        await fs.writeFile(path.join(dir, `${voiceClipId}.webm`), req.file.buffer);
-      } catch (e) {
-        console.warn('[VoiceLane] failed to persist voice clip:', e.message);
-        voiceClipId = null;
-      }
-    }
-
-    res.status(200).json({ ...finalResult, voiceClipId });
+    // The raw recording is used ONLY for analysis and is then discarded — it is
+    // never stored or played back (PROJECT BRIEF §3B.6 / §4). Playback uses the
+    // sender's enrolled voice clone instead.
+    res.status(200).json(result || neutralResult(text));
   } catch (error) {
     console.error('Emotion analysis error:', error);
     // Never block sending a message — degrade silently to neutral.
-    res.status(200).json({ ...neutralResult((req.body?.text || '').trim()), voiceClipId: null });
+    res.status(200).json(neutralResult((req.body?.text || '').trim()));
   }
 };
 
@@ -246,7 +230,7 @@ export const analyzeMessageText = (req, res) => {
 // Each tier degrades gracefully to the next, so playback never hard-fails.
 export const synthesizeAudio = async (req, res) => {
   try {
-    const { text, emotion, voiceCloneId, senderId, voiceClipId, messageId } = req.body;
+    const { text, emotion, voiceCloneId, senderId, messageId } = req.body;
 
     if (!text) {
       return res.status(400).json({ message: 'No text provided for synthesis' });
@@ -267,14 +251,14 @@ export const synthesizeAudio = async (req, res) => {
         // exists (so we never clone the same message twice concurrently).
         if (isValidMessageId(messageId)) {
           const out = await enqueueClone(messageId, () =>
-            generateAndCache({ messageId, text, senderId, emotion, voiceClipId })
+            generateAndCache({ messageId, text, senderId, emotion })
           );
           res.setHeader('Content-Type', 'audio/wav');
           return res.sendFile(out);
         }
 
         // No messageId (unexpected) — one-off clone without caching.
-        const refPath = await resolveReference({ senderId, voiceClipId });
+        const refPath = await resolveReference({ senderId });
         if (refPath) {
           const wav = await cloneViaService({ text, refPath, emotion });
           res.setHeader('Content-Type', 'audio/wav');

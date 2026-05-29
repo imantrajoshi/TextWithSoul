@@ -27,7 +27,6 @@ export default function MessageInput({ conversationId, onSend }) {
   const audioChunksRef = useRef([]);
   const timerRef = useRef(null);
   const typedTimerRef = useRef(null);
-  const voiceClipIdRef = useRef(null);
 
   const currentDurationRef = useRef(0);
 
@@ -74,12 +73,10 @@ export default function MessageInput({ conversationId, onSend }) {
       emotion: pendingEmotion?.emotion || 'neutral',
       emotionIntensity: pendingEmotion?.emotionIntensity || 0,
       segments: pendingEmotion?.segments || [],
-      emotionConfirmed: pendingEmotion?.confirmed || false,
-      voiceClipId: voiceClipIdRef.current || undefined
+      emotionConfirmed: pendingEmotion?.confirmed || false
     });
 
     if (typedTimerRef.current) clearTimeout(typedTimerRef.current);
-    voiceClipIdRef.current = null;
     setText('');
     setPendingEmotion(null);
     setUncertaintyData(null);
@@ -140,7 +137,6 @@ export default function MessageInput({ conversationId, onSend }) {
     
     setMicError('');
     setText(''); // Clear previous text when starting new recording
-    voiceClipIdRef.current = null; // new recording → drop any prior clip id
     setConfirmEmotion(null);
     try {
       // Disable the browser's voice DSP — noise suppression / auto-gain /
@@ -213,7 +209,6 @@ export default function MessageInput({ conversationId, onSend }) {
     if (discard) {
       audioChunksRef.current = [];
       setText(''); // Clear text if discarded
-      voiceClipIdRef.current = null;
       setConfirmEmotion(null);
       setPendingEmotion(null);
     }
@@ -245,7 +240,6 @@ export default function MessageInput({ conversationId, onSend }) {
   const scheduleTypedAnalysis = (value) => {
     if (typedTimerRef.current) clearTimeout(typedTimerRef.current);
     if (!value.trim()) {
-      voiceClipIdRef.current = null; // cleared input → no recording applies
       setPendingEmotion(null);
       return;
     }
@@ -280,9 +274,6 @@ export default function MessageInput({ conversationId, onSend }) {
       const res = await api.post('/voice/analyze', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
-
-      // Keep the stored-recording id so playback can clone from this exact clip.
-      voiceClipIdRef.current = res.data.voiceClipId || null;
 
       // Provisional detection (used if the sender dismisses the confirm popup).
       const detected = res.data.emotion || 'neutral';

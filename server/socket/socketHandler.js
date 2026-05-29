@@ -47,7 +47,7 @@ const socketHandler = (io) => {
     // Send a message
     socket.on('message:send', async (data) => {
       try {
-        const { conversationId, text, emotion, emotionIntensity, voiceClipId, emotionConfirmed, segments } = data;
+        const { conversationId, text, emotion, emotionIntensity, emotionConfirmed, segments } = data;
 
         if (!conversationId || !text || !text.trim()) return;
 
@@ -99,11 +99,6 @@ const socketHandler = (io) => {
           }
         }
 
-        // Voice-message recording id (uuid), for cloning playback from the
-        // actual recording. Validated to prevent path traversal.
-        const safeVoiceClipId =
-          typeof voiceClipId === 'string' && /^[0-9a-f-]{36}$/i.test(voiceClipId) ? voiceClipId : '';
-
         // Create message
         const message = await Message.create({
           conversationId,
@@ -112,7 +107,6 @@ const socketHandler = (io) => {
           emotion: resolvedEmotion,
           emotionIntensity: resolvedIntensity,
           segments: resolvedSegments,
-          voiceClipId: safeVoiceClipId,
           readBy: [userId],
         });
 
@@ -133,14 +127,14 @@ const socketHandler = (io) => {
 
         // Decide whether this message will be voice-cloned, so the UI can show a
         // "preparing → ready" cue. Eligible = clone service on, NOT mixed-emotion
-        // (those play via browser TTS), and the sender has a usable reference clip.
+        // (those play via browser TTS), and the sender has an enrolled voice.
         const distinctEmotions = new Set(
           (resolvedSegments || []).map((s) => s.emotion).filter((e) => e && e !== 'neutral')
         );
         const isMixed = distinctEmotions.size >= 2;
         let cloneEligible = false;
         if (process.env.VOICE_CLONE_URL && !isMixed) {
-          const ref = await resolveReference({ senderId: userId, voiceClipId: safeVoiceClipId });
+          const ref = await resolveReference({ senderId: userId });
           cloneEligible = !!ref;
         }
         populatedMessage.cloneEligible = cloneEligible;
@@ -160,7 +154,6 @@ const socketHandler = (io) => {
               text: text.trim(),
               senderId: userId,
               emotion: resolvedEmotion,
-              voiceClipId: safeVoiceClipId,
             })
           )
             .then(() => {
