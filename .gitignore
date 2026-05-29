@@ -7,4 +7,5 @@ uploads
 voice-service/.venv
 voice-service/.venv-chatterbox
 voice-service/ab-samples
+voice-service/tuning
 __pycache__
