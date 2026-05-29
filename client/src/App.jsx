@@ -1,6 +1,8 @@
+import { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { SocketProvider } from './context/SocketContext';
+import { playbackManager } from './utils/playbackManager';
 import AuthPage from './pages/AuthPage';
 import ChatPage from './pages/ChatPage';
 import NotFound from './pages/NotFound';
@@ -81,6 +83,21 @@ function AppRoutes() {
 }
 
 export default function App() {
+  // Stop all voice playback when the tab is hidden / the page is being hidden,
+  // so the browser can't auto-resume queued speech on tab-switch or Mac wake.
+  useEffect(() => {
+    const onHide = () => {
+      if (document.visibilityState === 'hidden') playbackManager.stopAll();
+    };
+    const onPageHide = () => playbackManager.stopAll();
+    document.addEventListener('visibilitychange', onHide);
+    window.addEventListener('pagehide', onPageHide);
+    return () => {
+      document.removeEventListener('visibilitychange', onHide);
+      window.removeEventListener('pagehide', onPageHide);
+    };
+  }, []);
+
   return (
     <BrowserRouter>
       <AuthProvider>

@@ -18,6 +18,19 @@ export const playbackManager = {
   release(stopFn) {
     if (activeStop === stopFn) activeStop = null;
   },
+  // Hard-stop everything. Used when the tab is hidden / the app loses focus so
+  // the browser can't auto-resume queued speech when we come back (a Chrome /
+  // Safari speechSynthesis quirk that made audio replay on tab-switch / wake).
+  stopAll() {
+    if (typeof window !== 'undefined' && window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
+    if (activeStop) {
+      const previous = activeStop;
+      activeStop = null;
+      previous();
+    }
+  },
 };
 
 export default playbackManager;
