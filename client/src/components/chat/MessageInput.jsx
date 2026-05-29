@@ -23,7 +23,8 @@ export default function MessageInput({ conversationId, onSend }) {
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
   const timerRef = useRef(null);
-  
+  const typedTimerRef = useRef(null);
+
   const currentDurationRef = useRef(0);
 
   useEffect(() => {
@@ -61,13 +62,15 @@ export default function MessageInput({ conversationId, onSend }) {
       emit('typing:stop', { conversationId });
     }
 
-    // Call onSend with the resolved payload
+    // Call onSend with the resolved payload (including per-sentence segments).
     onSend({
       text: trimmed,
       emotion: pendingEmotion?.emotion || 'neutral',
-      emotionIntensity: pendingEmotion?.emotionIntensity || 0
+      emotionIntensity: pendingEmotion?.emotionIntensity || 0,
+      segments: pendingEmotion?.segments || []
     });
 
+    if (typedTimerRef.current) clearTimeout(typedTimerRef.current);
     setText('');
     setPendingEmotion(null);
     setUncertaintyData(null);
@@ -197,21 +200,52 @@ export default function MessageInput({ conversationId, onSend }) {
   useEffect(() => {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
+      if (typedTimerRef.current) clearTimeout(typedTimerRef.current);
     };
   }, []);
+
+  // FREE, local emotion detection for TYPED text. Debounced so it runs after the
+  // user pauses. Supports multiple emotions per message (per-sentence segments).
+  const scheduleTypedAnalysis = (value) => {
+    if (typedTimerRef.current) clearTimeout(typedTimerRef.current);
+    if (!value.trim()) {
+      setPendingEmotion(null);
+      return;
+    }
+    typedTimerRef.current = setTimeout(async () => {
+      try {
+        const res = await api.post('/voice/analyze-text', { text: value });
+        if (res.data.emotion === 'neutral' && !res.data.isMixed) {
+          setPendingEmotion(null);
+        } else {
+          setPendingEmotion({
+            emotion: res.data.emotion || 'neutral',
+            emotionIntensity: res.data.emotionIntensity || 0,
+            segments: res.data.segments || [],
+            emotions: res.data.emotions || [],
+            isMixed: !!res.data.isMixed,
+          });
+        }
+      } catch {
+        /* free local detection — ignore transient errors */
+      }
+    }, 500);
+  };
 
   const handleEmotionAnalysis = async (blob) => {
     setIsTranscribing(true);
     try {
       const formData = new FormData();
       formData.append('audio', blob, 'audio.webm');
+      // Send the free Web Speech transcript — it's the primary emotion signal.
+      formData.append('text', text || '');
 
       const res = await api.post('/voice/analyze', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
 
       // Text is already populated live by the Web Speech API; the server only
-      // returns the detected emotion here.
+      // returns the detected emotion(s) here.
       if (res.data.isUncertain) {
         setUncertaintyData({
           options: res.data.uncertaintyOptions,
@@ -221,7 +255,10 @@ export default function MessageInput({ conversationId, onSend }) {
       } else {
         setPendingEmotion({
           emotion: res.data.emotion || 'neutral',
-          emotionIntensity: res.data.emotionIntensity || 0
+          emotionIntensity: res.data.emotionIntensity || 0,
+          segments: res.data.segments || [],
+          emotions: res.data.emotions || [],
+          isMixed: !!res.data.isMixed,
         });
       }
 
@@ -275,12 +312,21 @@ export default function MessageInput({ conversationId, onSend }) {
       </AnimatePresence>
 
       {/* Tiny pending indicator */}
-      {pendingEmotion && pendingEmotion.emotion !== 'neutral' && !isRecording && !isTranscribing && (
+      {pendingEmotion && (pendingEmotion.emotion !== 'neutral' || pendingEmotion.isMixed) && !isRecording && !isTranscribing && (
         <div className="absolute -top-7 right-4 bg-bg-elevated border border-border-subtle rounded-full px-2.5 py-1 text-xs shadow-sm flex items-center gap-1.5 text-text-secondary animate-fade-in z-10">
-          <span>{getEmojiForEmotion(pendingEmotion.emotion)}</span>
-          <span className="capitalize">{pendingEmotion.emotion}</span>
-          <button 
-            type="button" 
+          {pendingEmotion.isMixed && pendingEmotion.emotions?.length > 1 ? (
+            <>
+              <span>{pendingEmotion.emotions.map(getEmojiForEmotion).join(' ')}</span>
+              <span className="capitalize">mixed</span>
+            </>
+          ) : (
+            <>
+              <span>{getEmojiForEmotion(pendingEmotion.emotion)}</span>
+              <span className="capitalize">{pendingEmotion.emotion}</span>
+            </>
+          )}
+          <button
+            type="button"
             onClick={() => setPendingEmotion(null)}
             className="ml-1 text-text-tertiary hover:text-danger rounded-full p-0.5"
           >
@@ -381,6 +427,7 @@ export default function MessageInput({ conversationId, onSend }) {
                     if (isTranscribing) return;
                     setText(e.target.value);
                     handleTyping();
+                    scheduleTypedAnalysis(e.target.value);
                   }}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && !e.shiftKey) {

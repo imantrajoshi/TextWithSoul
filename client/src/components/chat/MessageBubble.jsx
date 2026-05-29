@@ -86,6 +86,18 @@ const EMOTION_TTS = {
   neutral: { rate: 1.0, pitch: 1.0 },
 };
 
+// Per-emotion text colour for mixed-emotion messages (each sentence is shown in
+// its own emotion's accent on a neutral bubble so all emotions stay legible).
+const emotionTextColor = {
+  excited: 'text-orange-500',
+  happy: 'text-emerald-600',
+  sad: 'text-slate-500',
+  angry: 'text-red-600',
+  anxious: 'text-teal-600',
+  loving: 'text-pink-500',
+  neutral: 'text-text-primary',
+};
+
 export default function MessageBubble({
   message,
   isMine,
@@ -105,6 +117,12 @@ export default function MessageBubble({
   const bubbleClass = isMine ? style.bubble : style.otherBubble;
   const radiusClass = isMine ? 'rounded-br-sm' : 'rounded-bl-sm';
 
+  // Per-sentence emotion breakdown. A message is "mixed" when its sentences
+  // carry two or more distinct (non-neutral) emotions.
+  const segments = Array.isArray(message.segments) ? message.segments : [];
+  const distinctEmotions = [...new Set(segments.map((s) => s.emotion).filter((e) => e && e !== 'neutral'))];
+  const isMixed = distinctEmotions.length >= 2;
+
   // Playback State
   const [playState, setPlayState] = useState('idle');
   const [hasError, setHasError] = useState(false);
@@ -123,19 +141,36 @@ export default function MessageBubble({
     };
   }, []);
 
-  // FREE fallback playback using the browser's built-in voice. Returns false if
-  // SpeechSynthesis isn't available so the caller can show an error instead.
+  // FREE fallback playback using the browser's built-in voice. Speaks each
+  // sentence with ITS OWN emotion's rate/pitch, so a mixed message sounds happy
+  // on the happy line and sad on the sad line. Returns false if SpeechSynthesis
+  // isn't available so the caller can show an error instead.
   const speakWithBrowserTTS = () => {
     if (typeof window === 'undefined' || !window.speechSynthesis) return false;
     window.speechSynthesis.cancel();
-    const utter = new SpeechSynthesisUtterance(message.text);
-    const cfg = EMOTION_TTS[emotion] || EMOTION_TTS.neutral;
-    utter.rate = cfg.rate;
-    utter.pitch = cfg.pitch;
-    utter.onend = () => { usingTTSRef.current = false; setPlayState('idle'); };
-    utter.onerror = () => { usingTTSRef.current = false; setPlayState('idle'); };
+
+    const parts = segments.length
+      ? segments
+      : [{ text: message.text, emotion }];
+
     usingTTSRef.current = true;
-    window.speechSynthesis.speak(utter);
+    let i = 0;
+    const speakNext = () => {
+      if (!usingTTSRef.current || i >= parts.length) {
+        usingTTSRef.current = false;
+        setPlayState('idle');
+        return;
+      }
+      const part = parts[i++];
+      const utter = new SpeechSynthesisUtterance(part.text);
+      const cfg = EMOTION_TTS[part.emotion] || EMOTION_TTS.neutral;
+      utter.rate = cfg.rate;
+      utter.pitch = cfg.pitch;
+      utter.onend = speakNext;
+      utter.onerror = () => { usingTTSRef.current = false; setPlayState('idle'); };
+      window.speechSynthesis.speak(utter);
+    };
+    speakNext();
     return true;
   };
 
@@ -150,6 +185,14 @@ export default function MessageBubble({
       }
       usingTTSRef.current = false;
       setPlayState('idle');
+      return;
+    }
+
+    // Mixed-emotion messages play sentence-by-sentence with per-emotion voices —
+    // a single synthesized clip would flatten the mix, so use the free segmented voice.
+    if (isMixed) {
+      if (speakWithBrowserTTS()) setPlayState('playing');
+      else setHasError(true);
       return;
     }
 
@@ -205,23 +248,48 @@ export default function MessageBubble({
         animate={anim.animate}
         className={`flex flex-col ${isMine ? 'items-end' : 'items-start'} max-w-[85%] sm:max-w-[75%]`}
       >
-        <div
-          className={`
-            px-4 py-2.5 break-words rounded-2xl ${radiusClass} ${bubbleClass}
-          `}
-        >
-          <p className={`whitespace-pre-wrap ${style.text}`}>{message.text}</p>
-        </div>
-        
+        {isMixed ? (
+          // Mixed-emotion message: each sentence in its own emotion's colour/style.
+          <div className={`px-4 py-2.5 break-words rounded-2xl ${radiusClass} bg-bg-elevated border border-border-subtle space-y-1`}>
+            {segments.map((seg, idx) => {
+              const segStyle = emotionStyles[seg.emotion] || emotionStyles.neutral;
+              return (
+                <p key={idx} className={`whitespace-pre-wrap ${segStyle.text} ${emotionTextColor[seg.emotion] || 'text-text-primary'}`}>
+                  {seg.emotion !== 'neutral' && (
+                    <span className="mr-1">{getEmojiForEmotion(seg.emotion)}</span>
+                  )}
+                  {seg.text}
+                </p>
+              );
+            })}
+          </div>
+        ) : (
+          <div
+            className={`
+              px-4 py-2.5 break-words rounded-2xl ${radiusClass} ${bubbleClass}
+            `}
+          >
+            <p className={`whitespace-pre-wrap ${style.text}`}>{message.text}</p>
+          </div>
+        )}
+
         <div className={`flex items-center gap-2 mt-1.5 px-1 ${isMine ? 'flex-row-reverse' : 'flex-row'}`}>
           <span className="text-[11px] font-medium text-text-tertiary tracking-wide uppercase">
             {formatTime(message.createdAt)}
           </span>
-          
-          {emotion && emotion !== 'neutral' && (
-            <span className="text-[11px] font-medium text-text-secondary bg-bg-tertiary px-1.5 py-0.5 rounded-full flex items-center gap-1 opacity-70">
-              {getEmojiForEmotion(emotion)} {emotion}
-            </span>
+
+          {isMixed ? (
+            distinctEmotions.map((e) => (
+              <span key={e} className="text-[11px] font-medium text-text-secondary bg-bg-tertiary px-1.5 py-0.5 rounded-full flex items-center gap-1 opacity-70">
+                {getEmojiForEmotion(e)} {e}
+              </span>
+            ))
+          ) : (
+            emotion && emotion !== 'neutral' && (
+              <span className="text-[11px] font-medium text-text-secondary bg-bg-tertiary px-1.5 py-0.5 rounded-full flex items-center gap-1 opacity-70">
+                {getEmojiForEmotion(emotion)} {emotion}
+              </span>
+            )
           )}
 
           {!isMine && !hasError && (

@@ -1,7 +1,7 @@
 import express from 'express';
 import multer from 'multer';
 import auth from '../middleware/auth.js';
-import { analyzeVoice, synthesizeAudio, getUsageStats } from '../controllers/voiceController.js';
+import { analyzeVoice, analyzeMessageText, synthesizeAudio, getUsageStats } from '../controllers/voiceController.js';
 import { enrollSample, completeEnrollment } from '../controllers/enrollmentController.js';
 
 const router = express.Router();
@@ -14,9 +14,12 @@ const upload = multer({
   },
 });
 
-// Emotion analysis from the recorded audio.
-// (Transcription is handled client-side for free via the Web Speech API.)
+// Emotion analysis for a VOICE message (audio + free Web Speech transcript).
+// Text is the primary signal; transcription is handled client-side for free.
 router.post('/analyze', auth, upload.single('audio'), analyzeVoice);
+
+// Emotion analysis for a TYPED message — free, local, no audio.
+router.post('/analyze-text', auth, express.json(), analyzeMessageText);
 
 // PAID: ElevenLabs voice playback. Degrades to free browser TTS on the client.
 router.post('/synthesize', auth, express.json(), synthesizeAudio);

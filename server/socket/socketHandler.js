@@ -44,7 +44,7 @@ const socketHandler = (io) => {
     // Send a message
     socket.on('message:send', async (data) => {
       try {
-        const { conversationId, text, emotion, emotionIntensity } = data;
+        const { conversationId, text, emotion, emotionIntensity, segments } = data;
 
         if (!conversationId || !text || !text.trim()) return;
 
@@ -57,8 +57,21 @@ const socketHandler = (io) => {
         if (!conversation) return;
 
         // Resolve emotion — default to neutral if not provided
-        const resolvedEmotion = emotion || 'neutral';
+        const ALLOWED_EMOTIONS = ['excited', 'happy', 'sad', 'angry', 'anxious', 'loving', 'neutral'];
+        const resolvedEmotion = ALLOWED_EMOTIONS.includes(emotion) ? emotion : 'neutral';
         const resolvedIntensity = typeof emotionIntensity === 'number' ? emotionIntensity : 0;
+
+        // Sanitize per-sentence emotion breakdown (client-supplied).
+        const resolvedSegments = Array.isArray(segments)
+          ? segments.slice(0, 40).map((s) => ({
+              text: typeof s?.text === 'string' ? s.text.slice(0, 1000) : '',
+              emotion: ALLOWED_EMOTIONS.includes(s?.emotion) ? s.emotion : 'neutral',
+              emotionIntensity:
+                typeof s?.emotionIntensity === 'number'
+                  ? Math.max(0, Math.min(1, s.emotionIntensity))
+                  : 0,
+            })).filter((s) => s.text)
+          : [];
 
         // Create message
         const message = await Message.create({
@@ -67,6 +80,7 @@ const socketHandler = (io) => {
           text: text.trim(),
           emotion: resolvedEmotion,
           emotionIntensity: resolvedIntensity,
+          segments: resolvedSegments,
           readBy: [userId],
         });
 

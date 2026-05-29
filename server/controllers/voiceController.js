@@ -2,6 +2,7 @@ import WebSocket from 'ws';
 import axios from 'axios';
 import { EMOTION_VOICE_SETTINGS } from '../constants/emotionVoiceSettings.js';
 import { trackHume, trackElevenLabs, getUsage } from '../utils/usageTracker.js';
+import { analyzeText } from '../utils/emotionAnalyzer.js';
 
 /*
  * ──────────────────────────────────────────────────────────────────────────
@@ -83,6 +84,8 @@ const mapHumeToVybe = (humeEmotions) => {
   };
 };
 
+// Resolves { emotions, mocked }. `mocked: true` marks a FREE random fallback so
+// callers never let it override the reliable text-based signal.
 const analyzeEmotion = (audioBuffer) => {
   return new Promise((resolve) => {
     const keyMissing =
@@ -94,7 +97,7 @@ const analyzeEmotion = (audioBuffer) => {
     // No key → run the FREE mock. Zero spend.
     if (keyMissing) {
       console.log('[Hume][FREE MOCK] No API key — generating mock emotions (zero spend).');
-      setTimeout(() => resolve(mockEmotions()), 800);
+      setTimeout(() => resolve({ emotions: mockEmotions(), mocked: true }), 800);
       return;
     }
 
@@ -105,7 +108,7 @@ const analyzeEmotion = (audioBuffer) => {
     // Any failure degrades to the FREE mock so the demo keeps working.
     const degrade = (reason) => {
       console.warn(`[Hume] ${reason} — falling back to FREE mock emotions (no upgrade, zero spend).`);
-      resolve(mockEmotions());
+      resolve({ emotions: mockEmotions(), mocked: true });
     };
 
     const timeout = setTimeout(() => {
@@ -126,7 +129,7 @@ const analyzeEmotion = (audioBuffer) => {
         const response = JSON.parse(data);
         if (response.prosody?.predictions?.length > 0) {
           ws.close();
-          resolve(response.prosody.predictions[0].emotions);
+          resolve({ emotions: response.prosody.predictions[0].emotions, mocked: false });
         } else {
           ws.close();
           degrade('Empty prosody prediction');
@@ -150,22 +153,58 @@ const analyzeEmotion = (audioBuffer) => {
   });
 };
 
+const neutralResult = (text) => ({
+  emotion: 'neutral',
+  emotionIntensity: 0,
+  segments: text && text.trim() ? [{ text: text.trim(), emotion: 'neutral', emotionIntensity: 0 }] : [],
+  emotions: [],
+  isMixed: false,
+  isUncertain: false,
+  uncertaintyOptions: null,
+});
+
 // POST /api/voice/analyze
-// Detects emotion from the recorded audio. Transcription is NOT done here — it
-// happens client-side for free via the Web Speech API.
+// Emotion for a VOICE message. The transcript (free Web Speech text) is the
+// PRIMARY, reliable signal — it understands the words and supports multiple
+// emotions per message. Hume prosody (voice tone) is consulted only when the
+// text is neutral AND a real (non-mock) result is available — the random mock
+// can never override the text. Transcription itself is NOT done here.
 export const analyzeVoice = async (req, res) => {
   try {
-    if (!req.file) {
-      return res.status(400).json({ message: 'No audio file provided' });
+    const text = (req.body?.text || '').trim();
+    let result = text ? analyzeText(text) : null;
+
+    // Only reach for voice-tone when the words gave us nothing.
+    if ((!result || result.emotion === 'neutral') && req.file) {
+      const { emotions, mocked } = await analyzeEmotion(req.file.buffer);
+      if (!mocked && emotions?.length) {
+        const mapped = mapHumeToVybe(emotions);
+        if (mapped.emotion !== 'neutral') {
+          result = {
+            ...mapped,
+            segments: text ? [{ text, emotion: mapped.emotion, emotionIntensity: mapped.emotionIntensity }] : [],
+            emotions: [mapped.emotion],
+            isMixed: false,
+          };
+        }
+      }
     }
 
-    const humeEmotions = await analyzeEmotion(req.file.buffer);
-    res.status(200).json(mapHumeToVybe(humeEmotions));
+    res.status(200).json(result || neutralResult(text));
   } catch (error) {
     console.error('Emotion analysis error:', error);
     // Never block sending a message — degrade silently to neutral.
-    res.status(200).json({ emotion: 'neutral', emotionIntensity: 0, isUncertain: false, uncertaintyOptions: null });
+    res.status(200).json(neutralResult((req.body?.text || '').trim()));
   }
+};
+
+// POST /api/voice/analyze-text
+// Emotion for a TYPED message — free, local, no audio. Returns the same shape
+// as /analyze (dominant emotion + per-sentence segments + mixed flag).
+export const analyzeMessageText = (req, res) => {
+  const text = (req.body?.text || '').trim();
+  if (!text) return res.status(200).json(neutralResult(''));
+  res.status(200).json(analyzeText(text));
 };
 
 // POST /api/voice/synthesize
