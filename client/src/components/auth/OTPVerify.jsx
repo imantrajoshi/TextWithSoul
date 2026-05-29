@@ -2,8 +2,10 @@ import { useState, useRef, useEffect } from 'react';
 import { motion } from 'motion/react';
 import Button from '../ui/Button';
 
+const OTP_LENGTH = 4;
+
 export default function OTPVerify({ phoneNumber, onSubmit, onBack, loading }) {
-  const [otp, setOtp] = useState(['', '', '', '', '', '']);
+  const [otp, setOtp] = useState(Array(OTP_LENGTH).fill(''));
   const [error, setError] = useState('');
   const inputRefs = useRef([]);
 
@@ -21,12 +23,12 @@ export default function OTPVerify({ phoneNumber, onSubmit, onBack, loading }) {
     setError('');
 
     // Auto-focus next input
-    if (value && index < 5) {
+    if (value && index < OTP_LENGTH - 1) {
       inputRefs.current[index + 1]?.focus();
     }
 
-    // Auto-submit when all 6 digits entered
-    if (value && index === 5 && newOtp.every((d) => d)) {
+    // Auto-submit when all digits entered
+    if (value && index === OTP_LENGTH - 1 && newOtp.every((d) => d)) {
       onSubmit(newOtp.join(''));
     }
   };
@@ -39,11 +41,11 @@ export default function OTPVerify({ phoneNumber, onSubmit, onBack, loading }) {
 
   const handlePaste = (e) => {
     e.preventDefault();
-    const pastedData = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6);
-    if (pastedData.length === 6) {
+    const pastedData = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, OTP_LENGTH);
+    if (pastedData.length === OTP_LENGTH) {
       const newOtp = pastedData.split('');
       setOtp(newOtp);
-      inputRefs.current[5]?.focus();
+      inputRefs.current[OTP_LENGTH - 1]?.focus();
       onSubmit(pastedData);
     }
   };
@@ -51,8 +53,8 @@ export default function OTPVerify({ phoneNumber, onSubmit, onBack, loading }) {
   const handleSubmit = (e) => {
     e.preventDefault();
     const code = otp.join('');
-    if (code.length !== 6) {
-      setError('Enter all 6 digits');
+    if (code.length !== OTP_LENGTH) {
+      setError(`Enter all ${OTP_LENGTH} digits`);
       return;
     }
     onSubmit(code);
@@ -72,7 +74,7 @@ export default function OTPVerify({ phoneNumber, onSubmit, onBack, loading }) {
           Verify OTP
         </h2>
         <p className="text-sm text-text-secondary">
-          Enter the 6-digit code sent to{' '}
+          Enter the {OTP_LENGTH}-digit code sent to{' '}
           <span className="text-accent font-medium">{phoneNumber}</span>
         </p>
       </div>
@@ -108,7 +110,7 @@ export default function OTPVerify({ phoneNumber, onSubmit, onBack, loading }) {
       )}
 
       <div className="text-center text-xs text-text-tertiary">
-        Dev mode: OTP is <span className="text-accent font-mono">123456</span>
+        Dev mode: OTP is <span className="text-accent font-mono">1111</span>
       </div>
 
       <div className="flex gap-3">

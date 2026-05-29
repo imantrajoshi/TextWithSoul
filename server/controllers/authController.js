@@ -4,7 +4,7 @@ import { generateToken } from '../utils/generateToken.js';
 // In-memory OTP store: Map<phoneNumber, { otp, expiresAt }>
 const otpStore = new Map();
 
-const MOCK_OTP = '123456';
+const MOCK_OTP = '1111';
 const OTP_EXPIRY_MS = 5 * 60 * 1000; // 5 minutes
 
 // @desc    Send OTP to phone number
