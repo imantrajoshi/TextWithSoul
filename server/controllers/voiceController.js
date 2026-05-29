@@ -6,6 +6,14 @@ import { randomUUID } from 'crypto';
 import { EMOTION_VOICE_SETTINGS } from '../constants/emotionVoiceSettings.js';
 import { trackHume, trackElevenLabs, getUsage } from '../utils/usageTracker.js';
 import { analyzeText } from '../utils/emotionAnalyzer.js';
+import {
+  resolveReference,
+  cloneWithXTTS,
+  generateAndCache,
+  getCachedPath,
+  isValidMessageId,
+} from '../utils/ttsCloneService.js';
+import { enqueueClone } from '../utils/ttsQueue.js';
 
 /*
  * ──────────────────────────────────────────────────────────────────────────
@@ -228,54 +236,17 @@ export const analyzeMessageText = (req, res) => {
   res.status(200).json(analyzeText(text));
 };
 
-const VOICE_SAMPLE_EMOTIONS = ['neutral', 'happy', 'excited', 'sad', 'angry', 'anxious', 'loving'];
-
-// Locate the sender's enrolled voice sample to use as the clone reference:
-// prefer the message's emotion, then neutral, then any available sample.
-const findReferenceSample = async (senderId, emotion) => {
-  if (!senderId || !/^[a-f0-9]{24}$/i.test(String(senderId))) return null;
-  const dir = path.join(process.cwd(), 'uploads', 'voice-samples', String(senderId));
-  const order = [emotion, 'neutral', ...VOICE_SAMPLE_EMOTIONS].filter(
-    (e, i, arr) => VOICE_SAMPLE_EMOTIONS.includes(e) && arr.indexOf(e) === i
-  );
-  for (const e of order) {
-    const p = path.join(dir, `${e}.webm`);
-    try {
-      await fs.access(p);
-      return p;
-    } catch {
-      /* keep looking */
-    }
-  }
-  return null;
-};
-
-// VOICE-MESSAGE LANE: the actual recording the sender made for THIS message,
-// used as the clone reference so playback carries the real emotion of how it
-// was said. Returns null if there's no such clip (e.g. a typed message).
-const findVoiceMessageClip = async (senderId, voiceClipId) => {
-  if (!senderId || !/^[a-f0-9]{24}$/i.test(String(senderId))) return null;
-  if (!voiceClipId || !/^[0-9a-f-]{36}$/i.test(String(voiceClipId))) return null;
-  const p = path.join(process.cwd(), 'uploads', 'voice-messages', String(senderId), `${voiceClipId}.webm`);
-  try {
-    await fs.access(p);
-    return p;
-  } catch {
-    return null;
-  }
-};
-
 // POST /api/voice/synthesize
 // Voice playback, in order of preference:
 //   1. FREE self-hosted XTTS clone (VOICE_CLONE_URL) — the sender's OWN voice.
-//      Reference clip: the message's own recording (voice lane) if present,
-//      otherwise the sender's enrolled sample for the emotion (typed lane).
+//      Serves the pre-generated disk cache instantly when ready; otherwise
+//      generates now (reusing any in-flight pre-gen job for this message).
 //   2. PAID ElevenLabs (default voice) when a key is set.
 //   3. 503 { fallback: 'browser-tts' } → client uses the free browser voice.
 // Each tier degrades gracefully to the next, so playback never hard-fails.
 export const synthesizeAudio = async (req, res) => {
   try {
-    const { text, emotion, voiceCloneId, senderId, voiceClipId } = req.body;
+    const { text, emotion, voiceCloneId, senderId, voiceClipId, messageId } = req.body;
 
     if (!text) {
       return res.status(400).json({ message: 'No text provided for synthesis' });
@@ -285,30 +256,31 @@ export const synthesizeAudio = async (req, res) => {
     const cloneUrl = process.env.VOICE_CLONE_URL;
     if (cloneUrl) {
       try {
-        const refPath =
-          (await findVoiceMessageClip(senderId, voiceClipId)) ||
-          (await findReferenceSample(senderId, emotion));
-        if (refPath) {
-          const buf = await fs.readFile(refPath);
-          const form = new FormData();
-          form.append('text', text);
-          form.append('language', 'en');
-          form.append('speaker', new Blob([buf]), path.basename(refPath));
-
-          const r = await fetch(`${cloneUrl.replace(/\/$/, '')}/synthesize`, {
-            method: 'POST',
-            body: form,
-          });
-
-          if (r.ok) {
-            const wav = Buffer.from(await r.arrayBuffer());
-            res.setHeader('Content-Type', 'audio/wav');
-            return res.send(wav);
-          }
-          console.warn(`[VoiceClone] XTTS responded ${r.status} — falling back.`);
-        } else {
-          console.warn('[VoiceClone] Sender has no enrollment sample — falling back.');
+        // Instant path: serve the pre-generated cache if it's ready.
+        const cached = await getCachedPath(messageId);
+        if (cached) {
+          res.setHeader('Content-Type', 'audio/wav');
+          return res.sendFile(cached);
         }
+
+        // Not cached yet — generate now, reusing an in-flight pre-gen job if one
+        // exists (so we never clone the same message twice concurrently).
+        if (isValidMessageId(messageId)) {
+          const out = await enqueueClone(messageId, () =>
+            generateAndCache({ messageId, text, senderId, emotion, voiceClipId })
+          );
+          res.setHeader('Content-Type', 'audio/wav');
+          return res.sendFile(out);
+        }
+
+        // No messageId (unexpected) — one-off clone without caching.
+        const refPath = await resolveReference({ senderId, emotion, voiceClipId });
+        if (refPath) {
+          const wav = await cloneWithXTTS({ text, refPath });
+          res.setHeader('Content-Type', 'audio/wav');
+          return res.send(wav);
+        }
+        console.warn('[VoiceClone] no reference — falling back.');
       } catch (err) {
         console.warn(`[VoiceClone] XTTS unavailable (${err.message}) — falling back.`);
       }

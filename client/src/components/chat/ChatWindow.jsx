@@ -17,6 +17,7 @@ export default function ChatWindow({ conversation, onBack }) {
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(true);
   const [typingUsers, setTypingUsers] = useState({});
+  const [readyAudioIds, setReadyAudioIds] = useState(() => new Set());
 
   const messagesEndRef = useRef(null);
   const messagesContainerRef = useRef(null);
@@ -83,6 +84,21 @@ export default function ChatWindow({ conversation, onBack }) {
 
     return cleanup;
   }, [conversation._id, on, scrollToBottom, user._id, emit]);
+
+  // Pre-generated voice clone is ready → flip the bubble's indicator to "ready".
+  useEffect(() => {
+    const cleanup = on('audio:ready', ({ messageId, conversationId }) => {
+      if (conversationId === conversation._id) {
+        setReadyAudioIds((prev) => {
+          const next = new Set(prev);
+          next.add(messageId);
+          return next;
+        });
+      }
+    });
+
+    return cleanup;
+  }, [conversation._id, on]);
 
   // Listen for typing updates
   useEffect(() => {
@@ -198,6 +214,7 @@ export default function ChatWindow({ conversation, onBack }) {
                   isMine={isMine}
                   emotion={msg.emotion}
                   emotionIntensity={msg.emotionIntensity}
+                  audioReady={readyAudioIds.has(msg._id)}
                 />
               );
             })}

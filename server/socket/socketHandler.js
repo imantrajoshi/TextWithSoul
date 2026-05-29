@@ -2,6 +2,8 @@ import Message from '../models/Message.js';
 import Conversation from '../models/Conversation.js';
 import User from '../models/User.js';
 import { analyzeText } from '../utils/emotionAnalyzer.js';
+import { resolveReference, generateAndCache } from '../utils/ttsCloneService.js';
+import { enqueueClone } from '../utils/ttsQueue.js';
 
 // Track online users: Map<userId, Set<socketId>>
 const onlineUsers = new Map();
@@ -110,10 +112,50 @@ const socketHandler = (io) => {
           },
         });
 
+        // Decide whether this message will be voice-cloned, so the UI can show a
+        // "preparing → ready" cue. Eligible = clone service on, NOT mixed-emotion
+        // (those play via browser TTS), and the sender has a usable reference clip.
+        const distinctEmotions = new Set(
+          (resolvedSegments || []).map((s) => s.emotion).filter((e) => e && e !== 'neutral')
+        );
+        const isMixed = distinctEmotions.size >= 2;
+        let cloneEligible = false;
+        if (process.env.VOICE_CLONE_URL && !isMixed) {
+          const ref = await resolveReference({
+            senderId: userId,
+            emotion: resolvedEmotion,
+            voiceClipId: safeVoiceClipId,
+          });
+          cloneEligible = !!ref;
+        }
+        populatedMessage.cloneEligible = cloneEligible;
+
         // Emit to conversation room
         io.to(`conversation:${conversationId}`).emit('message:received', {
           message: populatedMessage,
         });
+
+        // PRE-GENERATION: clone the audio in the background now so the receiver's
+        // first tap is instant. Non-blocking; emits 'audio:ready' when cached.
+        if (cloneEligible) {
+          const mid = String(message._id);
+          enqueueClone(mid, () =>
+            generateAndCache({
+              messageId: mid,
+              text: text.trim(),
+              senderId: userId,
+              emotion: resolvedEmotion,
+              voiceClipId: safeVoiceClipId,
+            })
+          )
+            .then(() => {
+              io.to(`conversation:${conversationId}`).emit('audio:ready', {
+                messageId: mid,
+                conversationId,
+              });
+            })
+            .catch((e) => console.warn('[PreGen] failed for', mid, '-', e.message));
+        }
 
         // Also notify participants who aren't in the conversation room
         // (so their sidebar updates)

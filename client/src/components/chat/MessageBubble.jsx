@@ -105,6 +105,7 @@ export default function MessageBubble({
   showAvatar = false,
   emotion = 'neutral',
   emotionIntensity = 0,
+  audioReady = false,
 }) {
   const getEmojiForEmotion = (emo) => {
     const map = { excited: '⚡', happy: '😊', sad: '💙', angry: '🔴', anxious: '😰', loving: '🌸', neutral: '' };
@@ -229,6 +230,7 @@ export default function MessageBubble({
         const response = await api.post('/voice/synthesize', {
           text: message.text,
           emotion: emotion,
+          messageId: message._id,
           senderId: message.senderId?._id || message.senderId || null,
           voiceClipId: message.voiceClipId || null,
           voiceCloneId: message.sender?.voiceCloneId || null
@@ -328,6 +330,13 @@ export default function MessageBubble({
                 {getEmojiForEmotion(emotion)} {emotion}
               </span>
             )
+          )}
+
+          {!isMine && message.cloneEligible && (
+            <span
+              title={audioReady ? 'Voice ready — plays instantly' : 'Preparing voice…'}
+              className={`w-1.5 h-1.5 rounded-full ${audioReady ? 'bg-emerald-500' : 'bg-amber-400 animate-pulse'}`}
+            />
           )}
 
           {!isMine && !hasError && (
