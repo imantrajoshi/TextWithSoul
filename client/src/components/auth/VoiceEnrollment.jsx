@@ -36,7 +36,12 @@ export default function VoiceEnrollment({ onComplete }) {
   const startRecording = async () => {
     setError('');
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Capture raw voice — disable browser DSP (noise suppression / auto-gain /
+      // echo cancellation) so the enrollment reference keeps the speaker's true
+      // timbre and pitch (DSP thinning was making clones sound wrong).
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 },
+      });
       streamRef.current = stream;
       const mr = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' });
       mediaRecorderRef.current = mr;

@@ -8,7 +8,7 @@ import { trackHume, trackElevenLabs, getUsage } from '../utils/usageTracker.js';
 import { analyzeText } from '../utils/emotionAnalyzer.js';
 import {
   resolveReference,
-  cloneWithXTTS,
+  cloneViaService,
   generateAndCache,
   getCachedPath,
   isValidMessageId,
@@ -274,9 +274,9 @@ export const synthesizeAudio = async (req, res) => {
         }
 
         // No messageId (unexpected) — one-off clone without caching.
-        const refPath = await resolveReference({ senderId, emotion, voiceClipId });
+        const refPath = await resolveReference({ senderId, voiceClipId });
         if (refPath) {
-          const wav = await cloneWithXTTS({ text, refPath });
+          const wav = await cloneViaService({ text, refPath, emotion });
           res.setHeader('Content-Type', 'audio/wav');
           return res.send(wav);
         }

@@ -121,11 +121,7 @@ const socketHandler = (io) => {
         const isMixed = distinctEmotions.size >= 2;
         let cloneEligible = false;
         if (process.env.VOICE_CLONE_URL && !isMixed) {
-          const ref = await resolveReference({
-            senderId: userId,
-            emotion: resolvedEmotion,
-            voiceClipId: safeVoiceClipId,
-          });
+          const ref = await resolveReference({ senderId: userId, voiceClipId: safeVoiceClipId });
           cloneEligible = !!ref;
         }
         populatedMessage.cloneEligible = cloneEligible;

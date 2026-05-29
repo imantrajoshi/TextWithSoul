@@ -121,7 +121,12 @@ export default function MessageInput({ conversationId, onSend }) {
     setText(''); // Clear previous text when starting new recording
     voiceClipIdRef.current = null; // new recording → drop any prior clip id
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Disable the browser's voice DSP — noise suppression / auto-gain /
+      // echo cancellation thin out the low end and lift perceived pitch, which
+      // makes the cloned voice sound wrong. We want the raw, natural timbre.
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 },
+      });
       const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' });
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];

@@ -1,4 +1,14 @@
-# Vybe Voice Clone Service (XTTS-v2) — FREE / self-hosted
+# Vybe Voice Clone Service — FREE / self-hosted
+
+> **Active engine: Chatterbox (MIT, port 8001)** — see the Chatterbox section below.
+> XTTS-v2 (port 8000, this doc) is kept running as a one-line-revert fallback
+> (`VOICE_CLONE_URL=http://127.0.0.1:8000`). We moved to Chatterbox because it's
+> license-safe AND separates voice identity (stable reference) from emotion
+> (`exaggeration`), which fixed the per-emotion pitch drift.
+
+---
+
+# XTTS-v2 (fallback engine)
 
 Speaks any text in a **sender's own voice**, cloned from a short reference clip.
 This is the real voice-clone engine that replaces the placeholder ElevenLabs
