@@ -26,6 +26,12 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    // Emotions the user has recorded a voice sample for (powers the typed lane:
+    // typed message → detected emotion → matching sample drives the clone).
+    enrolledEmotions: {
+      type: [String],
+      default: [],
+    },
     isOnline: {
       type: Boolean,
       default: false,

@@ -7,7 +7,7 @@ import NotFound from './pages/NotFound';
 import Loader from './components/ui/Loader';
 
 function ProtectedRoute({ children }) {
-  const { isAuthenticated, loading, needsProfile } = useAuth();
+  const { isAuthenticated, loading, needsProfile, needsVoiceEnrollment } = useAuth();
 
   if (loading) {
     return (
@@ -21,8 +21,8 @@ function ProtectedRoute({ children }) {
     return <Navigate to="/" replace />;
   }
 
-  // If user hasn't set up profile, redirect to auth page
-  if (needsProfile) {
+  // If user hasn't finished onboarding (profile or voice), send back to auth page
+  if (needsProfile || needsVoiceEnrollment) {
     return <Navigate to="/" replace />;
   }
 
@@ -30,7 +30,7 @@ function ProtectedRoute({ children }) {
 }
 
 function PublicRoute({ children }) {
-  const { isAuthenticated, loading, needsProfile } = useAuth();
+  const { isAuthenticated, loading, needsProfile, needsVoiceEnrollment } = useAuth();
 
   if (loading) {
     return (
@@ -40,7 +40,8 @@ function PublicRoute({ children }) {
     );
   }
 
-  if (isAuthenticated && !needsProfile) {
+  // Only send to chat once onboarding (profile + voice enrollment) is done.
+  if (isAuthenticated && !needsProfile && !needsVoiceEnrollment) {
     return <Navigate to="/chat" replace />;
   }
 

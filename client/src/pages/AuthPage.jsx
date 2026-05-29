@@ -1,22 +1,30 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AnimatePresence, motion } from 'motion/react';
 import { useAuth } from '../context/AuthContext';
 import LoginForm from '../components/auth/LoginForm';
 import OTPVerify from '../components/auth/OTPVerify';
 import ProfileSetup from '../components/auth/ProfileSetup';
+import VoiceEnrollment from '../components/auth/VoiceEnrollment';
 import api from '../services/api';
 
 const APP_NAME = import.meta.env.VITE_APP_NAME || 'Vybe';
+const STEP_ORDER = ['phone', 'otp', 'profile', 'voice'];
 
 export default function AuthPage() {
-  const { login, updateUser } = useAuth();
+  const { login, updateUser, user, needsProfile, needsVoiceEnrollment } = useAuth();
   const navigate = useNavigate();
 
-  const [step, setStep] = useState('phone'); // 'phone' | 'otp' | 'profile'
+  const [step, setStep] = useState('phone'); // 'phone' | 'otp' | 'profile' | 'voice'
   const [phoneNumber, setPhoneNumber] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
+  // Resume the right onboarding step for an already-authenticated user (e.g. reload).
+  useEffect(() => {
+    if (needsProfile) setStep('profile');
+    else if (needsVoiceEnrollment) setStep('voice');
+  }, [user, needsProfile, needsVoiceEnrollment]);
 
   // Step 1: Send OTP
   const handleSendOTP = async (phone) => {
@@ -61,12 +69,18 @@ export default function AuthPage() {
     try {
       const res = await api.patch('/auth/setup-profile', { displayName });
       updateUser(res.data.user);
-      navigate('/chat');
+      setStep('voice');
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to update profile');
     } finally {
       setLoading(false);
     }
+  };
+
+  // Step 4: Voice enrollment complete
+  const handleEnrollmentComplete = (updatedUser) => {
+    updateUser(updatedUser || { voiceEnrolled: true });
+    navigate('/chat');
   };
 
   return (
@@ -148,18 +162,21 @@ export default function AuthPage() {
                 loading={loading}
               />
             )}
+            {step === 'voice' && (
+              <VoiceEnrollment key="voice" onComplete={handleEnrollmentComplete} />
+            )}
           </AnimatePresence>
         </div>
 
         {/* Minimal Step indicator */}
         <div className="flex justify-center gap-2 mt-6">
-          {['phone', 'otp', 'profile'].map((s, i) => (
+          {STEP_ORDER.map((s, i) => (
             <div
               key={s}
               className={`h-1 rounded-full transition-all duration-300 ease-out ${
                 step === s
                   ? 'w-6 bg-accent'
-                  : i < ['phone', 'otp', 'profile'].indexOf(step)
+                  : i < STEP_ORDER.indexOf(step)
                   ? 'w-4 bg-accent/30'
                   : 'w-2 bg-border'
               }`}

@@ -2,6 +2,7 @@ import express from 'express';
 import multer from 'multer';
 import auth from '../middleware/auth.js';
 import { analyzeVoice, synthesizeAudio, getUsageStats } from '../controllers/voiceController.js';
+import { enrollSample, completeEnrollment } from '../controllers/enrollmentController.js';
 
 const router = express.Router();
 
@@ -19,6 +20,10 @@ router.post('/analyze', auth, upload.single('audio'), analyzeVoice);
 
 // PAID: ElevenLabs voice playback. Degrades to free browser TTS on the client.
 router.post('/synthesize', auth, express.json(), synthesizeAudio);
+
+// Voice-clone enrollment (free plumbing — stores one audio sample per emotion).
+router.post('/enroll/sample', auth, upload.single('audio'), enrollSample);
+router.post('/enroll/complete', auth, completeEnrollment);
 
 // Dev helper: inspect cumulative paid-API usage for this server run.
 router.get('/usage', auth, getUsageStats);

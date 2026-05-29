@@ -62,6 +62,7 @@ export const AuthProvider = ({ children }) => {
     loading,
     isAuthenticated: !!user && !!token,
     needsProfile: user && !user.displayName,
+    needsVoiceEnrollment: user && !!user.displayName && !user.voiceEnrolled,
     login,
     updateUser,
     logout,
