@@ -27,6 +27,10 @@ export default function MessageInput({ conversationId, onSend }) {
   const audioChunksRef = useRef([]);
   const timerRef = useRef(null);
   const typedTimerRef = useRef(null);
+  // Live mirror of the speech transcript — written synchronously from the
+  // recognizer's onresult so the audio analyzer reads the actual words instead
+  // of a stale React-state closure from when recording started.
+  const transcriptRef = useRef('');
 
   const currentDurationRef = useRef(0);
 
@@ -113,6 +117,7 @@ export default function MessageInput({ conversationId, onSend }) {
       for (let i = 0; i < event.results.length; i++) {
         transcript += event.results[i][0].transcript;
       }
+      transcriptRef.current = transcript; // sync mirror for the audio analyzer
       setText(transcript);
     };
     rec.onerror = (event) => {
@@ -137,6 +142,7 @@ export default function MessageInput({ conversationId, onSend }) {
     
     setMicError('');
     setText(''); // Clear previous text when starting new recording
+    transcriptRef.current = '';
     setConfirmEmotion(null);
     try {
       // Disable the browser's voice DSP — noise suppression / auto-gain /
@@ -160,6 +166,9 @@ export default function MessageInput({ conversationId, onSend }) {
         clearInterval(timerRef.current);
 
         stopRecognition();
+        // Give Web Speech a beat to emit its final result via onresult so the
+        // analyzer sees the full transcript instead of clipping the last word.
+        await new Promise((r) => setTimeout(r, 200));
 
         const duration = currentDurationRef.current;
         setRecordingTime(0);
@@ -268,8 +277,9 @@ export default function MessageInput({ conversationId, onSend }) {
     try {
       const formData = new FormData();
       formData.append('audio', blob, 'audio.webm');
-      // Send the free Web Speech transcript — it's the primary emotion signal.
-      formData.append('text', text || '');
+      // Read the transcript from the live ref (not the stale closure-captured
+      // React state) so the analyzer sees the actual words.
+      formData.append('text', transcriptRef.current || '');
 
       const res = await api.post('/voice/analyze', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },

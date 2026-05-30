@@ -51,17 +51,19 @@ const LEXICON = {
   happy: {
     happy: 2.5, glad: 2.5, joy: 2.5, joyful: 2.5, great: 1.5, awesome: 2, wonderful: 2.5,
     good: 1, nice: 1, lovely: 2, smile: 1.5, smiling: 1.5, pleased: 2, delighted: 2.5,
-    cheerful: 2.5, yay: 2, congrats: 2.5, congratulations: 2.5, lol: 1.5, haha: 1.5,
-    hehe: 1.5, lmao: 2, blessed: 2,
+    cheerful: 2.5, congrats: 2.5, congratulations: 2.5, lol: 1.5, haha: 1.5,
+    hehe: 1.5, lmao: 2, blessed: 2, birthday: 1.5,
   },
   excited: {
     excited: 3, exciting: 3, thrilled: 3, ecstatic: 3.5, pumped: 3, hyped: 3, amazing: 2.5,
     incredible: 2.5, wow: 2, omg: 1.5, celebrate: 2.5, woohoo: 3, stoked: 3, fantastic: 2.5,
+    yay: 2.5, yippee: 3, yes: 1.5,
   },
   sad: {
     sad: 3, unhappy: 3, depressed: 3.5, miserable: 3.5, heartbroken: 4, cry: 2.5, crying: 3,
     tears: 2.5, lonely: 3, alone: 1.5, hurt: 2, hurts: 2, broken: 2, sorrow: 3, grief: 3,
     miss: 1.5, missing: 1.5, upset: 2.5, sucks: 1.5, terrible: 2, awful: 2, worst: 2, devastated: 3.5,
+    failed: 2, fail: 1.5, rejected: 2, disappointed: 2.5,
   },
   angry: {
     angry: 3, mad: 2.5, furious: 3.5, rage: 3.5, hate: 3, annoyed: 2.5, irritated: 2.5,
@@ -70,7 +72,7 @@ const LEXICON = {
   anxious: {
     anxious: 3, nervous: 3, worried: 3, worry: 2.5, scared: 3, afraid: 3, fear: 2.5, terrified: 3.5,
     panic: 3.5, panicking: 3.5, stressed: 3, stress: 2.5, overwhelmed: 3, uneasy: 2.5, tense: 2.5,
-    dread: 3, restless: 2.5,
+    dread: 3, restless: 2.5, terrifying: 3, scary: 2, frightening: 3,
   },
   loving: {
     love: 3, adore: 3, sweetheart: 3, darling: 3, beloved: 3, cherish: 3, hug: 1.5, hugs: 2,
