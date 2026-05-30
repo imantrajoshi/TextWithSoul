@@ -119,11 +119,18 @@ export default function MessageBubble({
   const bubbleClass = isMine ? style.bubble : style.otherBubble;
   const radiusClass = isMine ? 'rounded-br-sm' : 'rounded-bl-sm';
 
-  // Per-sentence emotion breakdown. A message is "mixed" when its sentences
-  // carry two or more distinct (non-neutral) emotions.
+  // A message is "mixed" when it carries two or more distinct (non-neutral)
+  // emotions — either set explicitly via the multi-select confirm popup, or
+  // detected across the sentences by text analysis.
   const segments = Array.isArray(message.segments) ? message.segments : [];
-  const distinctEmotions = [...new Set(segments.map((s) => s.emotion).filter((e) => e && e !== 'neutral'))];
+  const fromSegments = [...new Set(segments.map((s) => s.emotion).filter((e) => e && e !== 'neutral'))];
+  const fromMessage = Array.isArray(message.emotions)
+    ? message.emotions.filter((e) => e && e !== 'neutral')
+    : [];
+  const distinctEmotions = fromMessage.length > 0 ? [...new Set(fromMessage)] : fromSegments;
   const isMixed = distinctEmotions.length >= 2;
+  // Per-sentence rendering only when the segments really carry distinct per-sentence emotions.
+  const perSentenceMixed = fromSegments.length >= 2 && segments.length >= 2;
 
   // Playback State
   const [playState, setPlayState] = useState('idle');
@@ -212,9 +219,10 @@ export default function MessageBubble({
     // Take over the single global playback slot — stops any other message.
     playbackManager.start(stopPlayback);
 
-    // Mixed-emotion messages play sentence-by-sentence with per-emotion voices —
-    // a single synthesized clip would flatten the mix, so use the free segmented voice.
-    if (isMixed) {
+    // Per-sentence mixed messages play sentence-by-sentence with per-emotion
+    // voices — a single synthesized clip would flatten the mix, so use the free
+    // segmented voice. Whole-message multi-tagging still clones (dominant emotion).
+    if (perSentenceMixed) {
       if (speakWithBrowserTTS()) setPlayState('playing');
       else { setHasError(true); playbackManager.release(stopPlayback); }
       return;
@@ -276,8 +284,8 @@ export default function MessageBubble({
         animate={anim.animate}
         className={`flex flex-col ${isMine ? 'items-end' : 'items-start'} max-w-[85%] sm:max-w-[75%]`}
       >
-        {isMixed ? (
-          // Mixed-emotion message: each sentence in its own emotion's colour/style.
+        {perSentenceMixed ? (
+          // Per-sentence mixed: each sentence in its own emotion's colour/style.
           <div className={`px-4 py-2.5 break-words rounded-2xl ${radiusClass} bg-bg-elevated border border-border-subtle space-y-1`}>
             {segments.map((seg, idx) => {
               const segStyle = emotionStyles[seg.emotion] || emotionStyles.neutral;

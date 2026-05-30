@@ -47,7 +47,7 @@ const socketHandler = (io) => {
     // Send a message
     socket.on('message:send', async (data) => {
       try {
-        const { conversationId, text, emotion, emotionIntensity, emotionConfirmed, segments } = data;
+        const { conversationId, text, emotion, emotionIntensity, emotionConfirmed, segments, emotions } = data;
 
         if (!conversationId || !text || !text.trim()) return;
 
@@ -60,29 +60,26 @@ const socketHandler = (io) => {
         if (!conversation) return;
 
         const ALLOWED_EMOTIONS = ['excited', 'happy', 'sad', 'angry', 'anxious', 'loving', 'neutral'];
-        let resolvedEmotion, resolvedIntensity, resolvedSegments;
+        let resolvedEmotion, resolvedIntensity, resolvedSegments, resolvedEmotions;
 
         if (emotionConfirmed === true && ALLOWED_EMOTIONS.includes(emotion)) {
-          // The sender explicitly confirmed the emotion (voice-note popup) — trust
-          // it verbatim, over the text analysis. This is how an angry tone with
-          // neutral words still comes through as angry.
+          // The sender explicitly confirmed (voice-note popup). Trust them.
           resolvedEmotion = emotion;
           resolvedIntensity = typeof emotionIntensity === 'number' ? emotionIntensity : 0.8;
 
-          // If they kept a MIXED breakdown, preserve their per-sentence segments;
-          // otherwise collapse the whole message to the single confirmed emotion.
-          const cleanSegments = Array.isArray(segments)
-            ? segments.slice(0, 40).map((s) => ({
-                text: typeof s?.text === 'string' ? s.text.slice(0, 1000) : '',
-                emotion: ALLOWED_EMOTIONS.includes(s?.emotion) ? s.emotion : 'neutral',
-                emotionIntensity:
-                  typeof s?.emotionIntensity === 'number' ? Math.max(0, Math.min(1, s.emotionIntensity)) : 0,
-              })).filter((s) => s.text)
+          // Sanitise the client's multi-select emotions: validate + dedupe + drop neutral.
+          const cleanEmotions = Array.isArray(emotions)
+            ? [...new Set(emotions.filter((e) => ALLOWED_EMOTIONS.includes(e) && e !== 'neutral'))]
             : [];
-          resolvedSegments =
-            cleanSegments.length > 1
-              ? cleanSegments
-              : [{ text: text.trim(), emotion: resolvedEmotion, emotionIntensity: resolvedIntensity }];
+          resolvedEmotions =
+            cleanEmotions.length > 0
+              ? cleanEmotions
+              : (resolvedEmotion !== 'neutral' ? [resolvedEmotion] : []);
+
+          // Confirmed multi tags the whole message; segments collapse to one with
+          // the dominant emotion (the body styles by the dominant; the chip row
+          // shows all of `emotions`).
+          resolvedSegments = [{ text: text.trim(), emotion: resolvedEmotion, emotionIntensity: resolvedIntensity }];
         } else {
           // Otherwise resolve AUTHORITATIVELY from the words so every message gets
           // emotion + per-sentence segments regardless of client timing.
@@ -90,12 +87,14 @@ const socketHandler = (io) => {
           resolvedEmotion = analysis.emotion;
           resolvedIntensity = analysis.emotionIntensity;
           resolvedSegments = analysis.segments;
+          resolvedEmotions = (analysis.emotions || []).filter((e) => e !== 'neutral');
 
-          // If the words were neutral but the client detected something, honour it.
+          // If the words were neutral but the client hinted something, honour it.
           if (resolvedEmotion === 'neutral' && ALLOWED_EMOTIONS.includes(emotion) && emotion !== 'neutral') {
             resolvedEmotion = emotion;
             resolvedIntensity = typeof emotionIntensity === 'number' ? emotionIntensity : 0;
             resolvedSegments = [{ text: text.trim(), emotion: resolvedEmotion, emotionIntensity: resolvedIntensity }];
+            resolvedEmotions = [resolvedEmotion];
           }
         }
 
@@ -107,6 +106,7 @@ const socketHandler = (io) => {
           emotion: resolvedEmotion,
           emotionIntensity: resolvedIntensity,
           segments: resolvedSegments,
+          emotions: resolvedEmotions,
           readBy: [userId],
         });
 
@@ -128,10 +128,13 @@ const socketHandler = (io) => {
         // Decide whether this message will be voice-cloned, so the UI can show a
         // "preparing → ready" cue. Eligible = clone service on, NOT mixed-emotion
         // (those play via browser TTS), and the sender has an enrolled voice.
-        const distinctEmotions = new Set(
+        // Per-sentence mixed (rare; comes from text analysis splitting a message
+        // into sentences with different emotions) → browser TTS per sentence,
+        // not the clone. Whole-message multi-tagging via the popup stays clone-able
+        // (with the dominant emotion).
+        const isMixed = new Set(
           (resolvedSegments || []).map((s) => s.emotion).filter((e) => e && e !== 'neutral')
-        );
-        const isMixed = distinctEmotions.size >= 2;
+        ).size >= 2;
         let cloneEligible = false;
         if (process.env.VOICE_CLONE_URL && !isMixed) {
           const ref = await resolveReference({ senderId: userId });

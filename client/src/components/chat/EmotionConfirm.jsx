@@ -1,13 +1,10 @@
+import { useState } from 'react';
 import { motion } from 'motion/react';
 
-// Shown after a VOICE note is recorded: lets the sender confirm (or correct) the
-// emotion, since the words alone can miss how it was actually said — e.g. an
-// angry tone with neutral words. The chosen emotion is sent as "confirmed" and
-// drives both the bubble styling and the cloned-voice expressiveness.
-//
-// If detection found MULTIPLE emotions, a "Keep mixed" option is offered (and is
-// the default): keeping it preserves the per-sentence breakdown; tapping a single
-// emotion collapses the whole message to that one.
+// Shown after a VOICE note is recorded: the sender confirms (or corrects) the
+// emotion(s). MULTI-SELECT — tap to toggle one or more, then Confirm.
+// Detected emotion(s) are pre-selected; the X dismisses without confirming and
+// keeps the auto-detected result (text analysis).
 const EMOTIONS = [
   { key: 'happy', emoji: '😊', label: 'Happy' },
   { key: 'excited', emoji: '⚡', label: 'Excited' },
@@ -18,9 +15,28 @@ const EMOTIONS = [
   { key: 'neutral', emoji: '💬', label: 'Neutral' },
 ];
 
-const emojiFor = (key) => EMOTIONS.find((e) => e.key === key)?.emoji || '';
+export default function EmotionConfirm({ detected, isMixed = false, emotions = [], onConfirm, onDismiss }) {
+  const initial = () => {
+    if (isMixed && emotions.length > 0) return new Set(emotions);
+    if (detected) return new Set([detected]);
+    return new Set();
+  };
+  const [selected, setSelected] = useState(initial);
 
-export default function EmotionConfirm({ detected, isMixed = false, emotions = [], onSelect, onDismiss }) {
+  const toggle = (key) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const handleConfirm = () => {
+    if (selected.size === 0) return;
+    onConfirm([...selected]);
+  };
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 10, scale: 0.95 }}
@@ -31,7 +47,7 @@ export default function EmotionConfirm({ detected, isMixed = false, emotions = [
     >
       <div className="flex justify-between items-center mb-3">
         <p className="text-sm font-medium text-text-primary">
-          How did you say it? <span className="text-text-tertiary">(tap to confirm)</span>
+          How did you say it? <span className="text-text-tertiary">(tap one or more)</span>
         </p>
         <button
           type="button"
@@ -43,26 +59,16 @@ export default function EmotionConfirm({ detected, isMixed = false, emotions = [
         </button>
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        {isMixed && (
-          <button
-            type="button"
-            onClick={() => onSelect('mixed')}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-medium transition-colors bg-accent text-white shadow-sm"
-          >
-            <span>{emotions.map(emojiFor).join(' ')}</span>
-            <span>Keep mixed</span>
-          </button>
-        )}
+      <div className="flex flex-wrap gap-2 mb-3">
         {EMOTIONS.map((e) => {
-          const highlighted = !isMixed && e.key === detected;
+          const isSelected = selected.has(e.key);
           return (
             <button
               key={e.key}
               type="button"
-              onClick={() => onSelect(e.key)}
+              onClick={() => toggle(e.key)}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-medium transition-colors ${
-                highlighted
+                isSelected
                   ? 'bg-accent text-white shadow-sm'
                   : 'bg-bg-tertiary text-text-secondary hover:bg-bg-secondary'
               }`}
@@ -72,6 +78,17 @@ export default function EmotionConfirm({ detected, isMixed = false, emotions = [
             </button>
           );
         })}
+      </div>
+
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={handleConfirm}
+          disabled={selected.size === 0}
+          className="px-4 py-1.5 rounded-xl text-sm font-semibold bg-accent text-white hover:shadow-glow transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          Confirm{selected.size > 1 ? ` (${selected.size})` : ''}
+        </button>
       </div>
     </motion.div>
   );

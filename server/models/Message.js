@@ -49,6 +49,13 @@ const messageSchema = new mongoose.Schema(
       type: [segmentSchema],
       default: [],
     },
+    // Distinct emotion tags for the whole message (length > 1 when the sender
+    // confirmed multiple emotions in the popup, or when text analysis detected
+    // several across sentences). Neutral is excluded by convention.
+    emotions: {
+      type: [{ type: String, enum: EMOTION_ENUM }],
+      default: [],
+    },
     audioProcessed: {
       type: Boolean,
       default: false,
