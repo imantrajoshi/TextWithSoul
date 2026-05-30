@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
 import Button from '../ui/Button';
 
@@ -14,11 +15,28 @@ const STEPS = [
 ];
 
 export default function VoiceEnrollment({ onComplete }) {
+  const { user, updateUser } = useAuth();
+  // Trust & Safety: explicit consent before we record/clone the user's voice.
+  const [phase, setPhase] = useState(user?.voiceConsent?.agreed ? 'recording' : 'consent');
   const [index, setIndex] = useState(0);
   const [isRecording, setIsRecording] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
   const [done, setDone] = useState({});
   const [error, setError] = useState('');
+
+  const handleAgree = async () => {
+    setIsBusy(true);
+    setError('');
+    try {
+      const res = await api.post('/auth/voice-consent');
+      updateUser(res.data.user);
+      setPhase('recording');
+    } catch (err) {
+      setError(err.response?.data?.message || 'Could not record consent — try again.');
+    } finally {
+      setIsBusy(false);
+    }
+  };
 
   const mediaRecorderRef = useRef(null);
   const chunksRef = useRef([]);
@@ -99,6 +117,44 @@ export default function VoiceEnrollment({ onComplete }) {
       setIsBusy(false);
     }
   };
+
+  if (phase === 'consent') {
+    return (
+      <motion.div
+        initial={{ opacity: 0, x: -20 }}
+        animate={{ opacity: 1, x: 0 }}
+        exit={{ opacity: 0, x: 20 }}
+        transition={{ duration: 0.3 }}
+        className="space-y-6"
+      >
+        <div className="space-y-2">
+          <h2 className="text-2xl font-bold font-display text-text-primary">
+            Create your AI voice
+          </h2>
+          <p className="text-sm text-text-secondary">
+            We'll record a few short clips to build your personal AI voice clone, used
+            only to read your own messages aloud on this account.
+          </p>
+        </div>
+
+        <ul className="text-sm text-text-secondary space-y-2 bg-bg-tertiary/40 border border-border rounded-2xl p-4">
+          <li>• Your recordings stay on this server — never shared.</li>
+          <li>• Your raw voice is <span className="text-text-primary font-medium">never sent</span> with a message; only the text and emotion travel.</li>
+          <li>• You can <span className="text-text-primary font-medium">delete your account and voice clone anytime</span> from the sidebar.</li>
+        </ul>
+
+        {error && (
+          <div className="bg-danger/10 border border-danger/20 text-danger text-sm rounded-xl px-4 py-3">
+            {error}
+          </div>
+        )}
+
+        <Button type="button" onClick={handleAgree} loading={isBusy} className="w-full" size="lg">
+          I agree, create my voice clone
+        </Button>
+      </motion.div>
+    );
+  }
 
   return (
     <motion.div

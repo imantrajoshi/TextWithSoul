@@ -32,6 +32,12 @@ const userSchema = new mongoose.Schema(
       type: [String],
       default: [],
     },
+    // Trust & Safety (PROJECT BRIEF §5): explicit consent must be given before
+    // we record/clone the user's voice. Required before any enrollment sample.
+    voiceConsent: {
+      agreed: { type: Boolean, default: false },
+      agreedAt: { type: Date, default: null },
+    },
     isOnline: {
       type: Boolean,
       default: false,

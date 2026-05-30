@@ -26,6 +26,11 @@ export const enrollSample = async (req, res) => {
       return res.status(400).json({ message: 'No audio sample provided' });
     }
 
+    // Trust & Safety (PROJECT BRIEF §5): no voice cloning without explicit consent.
+    if (!req.user?.voiceConsent?.agreed) {
+      return res.status(403).json({ message: 'Voice cloning consent required' });
+    }
+
     const emotion = (req.body.emotion || '').trim().toLowerCase();
     if (!ALLOWED_EMOTIONS.includes(emotion)) {
       return res.status(400).json({ message: `Invalid emotion: ${emotion}` });

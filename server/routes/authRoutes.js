@@ -1,6 +1,13 @@
 import express from 'express';
 import rateLimit from 'express-rate-limit';
-import { sendOTP, verifyOTP, setupProfile, getMe } from '../controllers/authController.js';
+import {
+  sendOTP,
+  verifyOTP,
+  setupProfile,
+  getMe,
+  recordVoiceConsent,
+  deleteAccount,
+} from '../controllers/authController.js';
 import auth from '../middleware/auth.js';
 
 const router = express.Router();
@@ -18,5 +25,7 @@ router.post('/send-otp', otpLimiter, sendOTP);
 router.post('/verify-otp', verifyOTP);
 router.patch('/setup-profile', auth, setupProfile);
 router.get('/me', auth, getMe);
+router.post('/voice-consent', auth, express.json(), recordVoiceConsent);
+router.delete('/account', auth, deleteAccount);
 
 export default router;

@@ -15,6 +15,21 @@ export default function Sidebar({ conversations, setConversations, className = '
   const navigate = useNavigate();
   const { conversationId } = useParams();
   const [showSearch, setShowSearch] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
+
+  const handleDeleteAccount = async () => {
+    setIsDeleting(true);
+    setDeleteError('');
+    try {
+      await api.delete('/auth/account');
+      logout();
+    } catch (err) {
+      setIsDeleting(false);
+      setDeleteError(err.response?.data?.message || 'Could not delete account');
+    }
+  };
 
   // Listen for conversation updates
   useEffect(() => {
@@ -185,16 +200,61 @@ export default function Sidebar({ conversations, setConversations, className = '
       </div>
 
       {/* User info footer */}
-      <div className="px-4 py-3 border-t border-border-subtle flex items-center gap-3">
-        <div className="w-8 h-8 rounded-full bg-accent-muted flex items-center justify-center text-xs font-semibold text-accent">
-          {user?.displayName?.charAt(0)?.toUpperCase() || '?'}
-        </div>
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium text-text-primary truncate">
-            {user?.displayName}
-          </p>
-          <p className="text-xs text-text-tertiary">{user?.phoneNumber}</p>
-        </div>
+      <div className="px-4 py-3 border-t border-border-subtle">
+        {showDeleteConfirm ? (
+          <div className="space-y-2">
+            <p className="text-xs text-text-secondary">
+              Permanently delete your account, all your messages, and your voice clone? This cannot be undone.
+            </p>
+            {deleteError && (
+              <p className="text-xs text-danger">{deleteError}</p>
+            )}
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={handleDeleteAccount}
+                disabled={isDeleting}
+                className="flex-1 text-xs font-semibold text-white bg-danger hover:bg-danger/90 rounded-lg py-2 transition-colors disabled:opacity-50"
+              >
+                {isDeleting ? 'Deleting…' : 'Delete forever'}
+              </button>
+              <button
+                type="button"
+                onClick={() => { setShowDeleteConfirm(false); setDeleteError(''); }}
+                disabled={isDeleting}
+                className="flex-1 text-xs font-semibold text-text-secondary bg-bg-tertiary hover:bg-bg-secondary rounded-lg py-2 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-full bg-accent-muted flex items-center justify-center text-xs font-semibold text-accent">
+              {user?.displayName?.charAt(0)?.toUpperCase() || '?'}
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium text-text-primary truncate">
+                {user?.displayName}
+              </p>
+              <p className="text-xs text-text-tertiary">{user?.phoneNumber}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowDeleteConfirm(true)}
+              className="p-1.5 rounded-lg text-text-tertiary hover:text-danger hover:bg-danger/10 transition-colors"
+              title="Delete account"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="3 6 5 6 21 6" />
+                <path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6" />
+                <path d="M10 11v6" />
+                <path d="M14 11v6" />
+                <path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2" />
+              </svg>
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

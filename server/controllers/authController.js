@@ -1,4 +1,9 @@
+import fs from 'fs/promises';
+import path from 'path';
 import User from '../models/User.js';
+import Message from '../models/Message.js';
+import Conversation from '../models/Conversation.js';
+import { cachePathFor } from '../utils/ttsCloneService.js';
 import { generateToken } from '../utils/generateToken.js';
 
 // In-memory OTP store: Map<phoneNumber, { otp, expiresAt }>
@@ -86,6 +91,7 @@ export const verifyOTP = async (req, res, next) => {
         displayName: user.displayName,
         profilePhoto: user.profilePhoto,
         voiceEnrolled: user.voiceEnrolled,
+        voiceConsent: user.voiceConsent || { agreed: false, agreedAt: null },
       },
       isNewUser,
     });
@@ -118,6 +124,7 @@ export const setupProfile = async (req, res, next) => {
         displayName: user.displayName,
         profilePhoto: user.profilePhoto,
         voiceEnrolled: user.voiceEnrolled,
+        voiceConsent: user.voiceConsent || { agreed: false, agreedAt: null },
       },
     });
   } catch (error) {
@@ -135,7 +142,83 @@ export const getMe = async (req, res) => {
       displayName: req.user.displayName,
       profilePhoto: req.user.profilePhoto,
       voiceEnrolled: req.user.voiceEnrolled,
+      voiceConsent: req.user.voiceConsent || { agreed: false, agreedAt: null },
       isOnline: req.user.isOnline,
     },
   });
+};
+
+// @desc    Record explicit voice-cloning consent (PROJECT BRIEF §5).
+// @route   POST /api/auth/voice-consent
+export const recordVoiceConsent = async (req, res, next) => {
+  try {
+    const user = await User.findByIdAndUpdate(
+      req.user._id,
+      { voiceConsent: { agreed: true, agreedAt: new Date() } },
+      { new: true }
+    ).select('_id displayName voiceEnrolled voiceConsent');
+
+    res.status(200).json({
+      message: 'Voice cloning consent recorded',
+      user: {
+        _id: user._id,
+        displayName: user.displayName,
+        voiceEnrolled: user.voiceEnrolled,
+        voiceConsent: user.voiceConsent,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Permanently delete the account: voice clone, messages, conversations.
+// @route   DELETE /api/auth/account
+// PROJECT BRIEF §5: account deletion → voice clone data permanently purged.
+export const deleteAccount = async (req, res, next) => {
+  try {
+    const userId = String(req.user._id);
+
+    // 1. Find this user's messages (we need their ids to purge cached audio).
+    const myMessages = await Message.find({ senderId: userId }).select('_id').lean();
+    const myMessageIds = myMessages.map((m) => String(m._id));
+
+    // 2. Purge cached cloned audio for those messages.
+    await Promise.all(
+      myMessageIds.map(async (mid) => {
+        try {
+          await fs.unlink(cachePathFor(mid));
+        } catch {
+          /* cache may not exist */
+        }
+      })
+    );
+
+    // 3. Find conversations this user is part of.
+    const myConversations = await Conversation.find({ participants: userId }).select('_id').lean();
+    const myConversationIds = myConversations.map((c) => c._id);
+
+    // 4. Delete messages in those conversations + this user's messages.
+    await Message.deleteMany({
+      $or: [{ senderId: userId }, { conversationId: { $in: myConversationIds } }],
+    });
+
+    // 5. Delete the conversations.
+    await Conversation.deleteMany({ _id: { $in: myConversationIds } });
+
+    // 6. Delete the user's voice clone identity (their enrollment samples).
+    try {
+      const samplesDir = path.join(process.cwd(), 'uploads', 'voice-samples', userId);
+      await fs.rm(samplesDir, { recursive: true, force: true });
+    } catch (e) {
+      console.warn('[deleteAccount] failed to remove voice samples:', e.message);
+    }
+
+    // 7. Finally, delete the user.
+    await User.findByIdAndDelete(userId);
+
+    res.status(200).json({ message: 'Account permanently deleted' });
+  } catch (error) {
+    next(error);
+  }
 };
